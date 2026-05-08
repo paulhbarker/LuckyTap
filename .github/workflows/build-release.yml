@@ -68,6 +68,11 @@ jobs:
           SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
           SIGNING_KEY_ALIAS:      ${{ secrets.SIGNING_KEY_ALIAS }}
           SIGNING_KEY_PASSWORD:   ${{ secrets.SIGNING_KEY_PASSWORD }}
+          # BuildConfig defaults — baked into the APK at compile time
+          LUCKYTAP_WIFI_SSID:     ${{ secrets.DEFAULT_WIFI_SSID }}
+          LUCKYTAP_WIFI_PASSWORD: ${{ secrets.DEFAULT_WIFI_PASSWORD }}
+          LUCKYTAP_WS_IP:         ${{ secrets.DEFAULT_WS_IP }}
+          LUCKYTAP_WS_PORT:       ${{ secrets.DEFAULT_WS_PORT }}
 
       # ── Upload artifacts to the GitHub release ───────────────────────────────
       - name: Upload APK to release

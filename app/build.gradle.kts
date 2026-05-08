@@ -10,8 +10,12 @@ val localProperties = Properties().apply {
     if (localPropsFile.exists()) load(localPropsFile.inputStream())
 }
 
-fun localProp(key: String, fallback: String): String =
-    localProperties.getProperty(key, fallback)
+// Resolve a build value: local.properties → CI environment variable → hardcoded fallback.
+// This means local dev uses local.properties, CI uses GitHub secrets, neither leaks into git.
+fun buildProp(localKey: String, envVar: String, fallback: String): String =
+    localProperties.getProperty(localKey)
+        ?: System.getenv(envVar)
+        ?: fallback
 
 // Allow versionName / versionCode to be overridden from the command line, e.g. in CI:
 //   ./gradlew assembleRelease -PversionName=1.2.3 -PversionCode=10203
@@ -47,10 +51,14 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // Inject WiFi / WebSocket defaults from local.properties into BuildConfig
-        buildConfigField("String", "DEFAULT_WIFI_SSID", "\"${localProp("luckytap.wifi.ssid", "")}\"")
-        buildConfigField("String", "DEFAULT_WIFI_PASSWORD", "\"${localProp("luckytap.wifi.password", "")}\"")
-        buildConfigField("String", "DEFAULT_WS_IP", "\"${localProp("luckytap.ws.ip", "10.0.0.1")}\"")
-        buildConfigField("String", "DEFAULT_WS_PORT", "\"${localProp("luckytap.ws.port", "8080")}\"")
+        buildConfigField("String", "DEFAULT_WIFI_SSID",     "\"${buildProp("luckytap.wifi.ssid",     "LUCKYTAP_WIFI_SSID",     "")}\"")
+        buildConfigField("String", "DEFAULT_WIFI_PASSWORD", "\"${buildProp("luckytap.wifi.password", "LUCKYTAP_WIFI_PASSWORD", "")}\"")
+        buildConfigField("String", "DEFAULT_WS_IP",         "\"${buildProp("luckytap.ws.ip",         "LUCKYTAP_WS_IP",         "10.0.0.1")}\"")
+        buildConfigField("String", "DEFAULT_WS_PORT",       "\"${buildProp("luckytap.ws.port",       "LUCKYTAP_WS_PORT",       "8080")}\"")
+        // Fail the build immediately if SSID is missing — prevents a silent empty-string APK
+        require(buildProp("luckytap.wifi.ssid", "LUCKYTAP_WIFI_SSID", "").isNotBlank()) {
+            "DEFAULT_WIFI_SSID is blank. Set luckytap.wifi.ssid in local.properties (local) or LUCKYTAP_WIFI_SSID env var (CI)."
+        }
     }
 
     buildFeatures {
