@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.1](https://github.com/paulhbarker/LuckyTap/compare/v1.0.0...v1.0.1) (2026-05-08)
+
+
+### Bug Fixes
+
+* resolve three production-only crash/bug issues ([57ba7c1](https://github.com/paulhbarker/LuckyTap/commit/57ba7c1775e966d0478260749bcfe1fda16bbd73))
+
 ## 1.0.0 (2026-05-08)
 
 
