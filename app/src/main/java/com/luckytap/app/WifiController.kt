@@ -85,6 +85,13 @@ class WifiController(private val context: Context) {
 
     @RequiresPermission(Manifest.permission.ACCESS_FINE_LOCATION)
     fun connectToWifi(context: Context, ssid: String, psk: String) {
+        // Android Q+ throws IllegalArgumentException from WifiNetworkSpecifier.Builder.setSsid()
+        // if the SSID is blank — guard here so the error surfaces cleanly.
+        if (ssid.isBlank()) {
+            Log.e(TAG, "connectToWifi() called with blank SSID — aborting. Configure SSID in Settings.")
+            _connectionStatus.postValue(WifiConnectionState.ERROR)
+            return
+        }
         if (!wifiManager.isWifiEnabled) {
             Log.w(TAG, "WiFi is not enabled.")
             _connectionStatus.postValue(WifiConnectionState.ERROR)

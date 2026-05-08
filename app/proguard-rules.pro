@@ -6,7 +6,7 @@
 #   http://developer.android.com/guide/developing/tools/proguard.html
 
 # Preserve line numbers for meaningful stack traces
--keepattributes SourceFile,LineNumberTable
+-keepattributes SourceFile,LineNumberTable,Signature,*Annotation*,EnclosingMethod,InnerClasses
 -renamesourcefileattribute SourceFile
 
 # --- OkHttp ---
@@ -26,5 +26,6 @@
 -dontwarn com.google.crypto.tink.**
 
 # --- Project-specific ---
-# Keep WebSocket listener callbacks (called reflectively by OkHttp)
--keep class com.example.nfcapp.WebSocketManager { *; }
+# Keep WebSocket class and its anonymous inner WebSocketListener
+-keep class com.luckytap.app.WebSocketManager { *; }
+-keep class com.luckytap.app.WebSocketManager$* { *; }

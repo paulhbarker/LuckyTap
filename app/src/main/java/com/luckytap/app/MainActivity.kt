@@ -712,6 +712,12 @@ class MainActivity : AppCompatActivity() {
         }
 
         val ssid = viewModel.getEffectiveWifiSsidForActivity()
+        if (ssid.isBlank()) {
+            Log.w("MainActivity", "Wi-Fi SSID not configured — skipping connection attempt.")
+            Toast.makeText(this, R.string.toast_wifi_ssid_not_configured, Toast.LENGTH_LONG).show()
+            viewModel.setWifiConnected(connected = false)
+            return
+        }
         val password = viewModel.getEffectiveWifiPasswordForActivity()
         Log.i("MainActivity", "Initiating WiFi connection to '$ssid'")
         wifiController.connectToWifi(applicationContext, ssid, password)

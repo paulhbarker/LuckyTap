@@ -34,6 +34,7 @@
     <string name="toast_location_permission_settings">Location permission permanently denied. Please enable it in App Settings.</string>
     <string name="toast_permissions_not_granted">Some required permissions were not granted.</string>
     <string name="toast_wifi_required">WiFi is required for the app to function.</string>
+    <string name="toast_wifi_ssid_not_configured">Wi-Fi network not configured. Open Settings to set your network name.</string>
     <string name="toast_location_required">Location services are necessary for WiFi features.</string>
     <string name="toast_enable_wifi">Please enable WiFi.</string>
     <string name="toast_location_services_required">Location services are required for WiFi on this Android version.</string>
