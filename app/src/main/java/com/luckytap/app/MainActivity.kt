@@ -163,11 +163,23 @@ class MainActivity : AppCompatActivity() {
         }
 
     private var hasPromptedNfcThisResume = false
+    private var isNfcStateReceiverRegistered = false
 
-    private val nfcEnableLauncher =
-        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-            updateNfcState() // just update UI, don't re-prompt
+    private val nfcStateReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            if (intent.action == NfcAdapter.ACTION_ADAPTER_STATE_CHANGED) {
+                val state = intent.getIntExtra(NfcAdapter.EXTRA_ADAPTER_STATE, NfcAdapter.STATE_OFF)
+                if (state == NfcAdapter.STATE_ON) {
+                    unregisterNfcStateReceiver()
+                    // Bring our activity back to the foreground, popping settings off the stack
+                    val bringBackIntent = Intent(context, MainActivity::class.java).apply {
+                        flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                    }
+                    startActivity(bringBackIntent)
+                }
+            }
         }
+    }
 
     private val settingsLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
@@ -223,7 +235,6 @@ class MainActivity : AppCompatActivity() {
         }
 
         setupNfcForegroundDispatch()
-        checkAndRequestPermissions()
         setupViewModelObservers()
         setupUiEventListeners()
         setupBackNavigation()
@@ -233,11 +244,15 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         hasPromptedNfcThisResume = false
         updateNfcState()
+        nfcAdapter?.enableForegroundDispatch(this, pendingIntent, intentFiltersArray, techListsArray)
+
+        // Sequence: NFC first, then permissions, then WiFi
         if (viewModel.nfcState.value == NfcState.DISABLED && !hasPromptedNfcThisResume) {
             hasPromptedNfcThisResume = true
             promptEnableNfc()
+            return // don't request permissions yet — wait for NFC to be enabled
         }
-        nfcAdapter?.enableForegroundDispatch(this, pendingIntent, intentFiltersArray, techListsArray)
+        checkAndRequestPermissions()
 
         // Only register WiFi receiver if we have the necessary permissions
         if (arePermissionsGranted()) {
@@ -263,6 +278,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        unregisterNfcStateReceiver()
         ringtone?.stop()
         ringtone = null
         wifiController.cleanup()
@@ -672,6 +688,11 @@ class MainActivity : AppCompatActivity() {
     private fun initiateWifiConnectionSequence() {
         if (viewModel.isWifiConnectedToTarget.value) return
 
+        // Don't restart if WifiController is already actively connecting/retrying
+        val wifiState = wifiController.connectionStatus.value
+        if (wifiState == WifiController.WifiConnectionState.CONNECTING ||
+            wifiState == WifiController.WifiConnectionState.CONNECTED) return
+
         if (!arePermissionsGranted()) {
             viewModel.setWifiConnected(connected = false)
             return
@@ -709,7 +730,23 @@ class MainActivity : AppCompatActivity() {
 
     private fun promptEnableNfc() {
         Toast.makeText(this, R.string.toast_enable_nfc, Toast.LENGTH_LONG).show()
-        nfcEnableLauncher.launch(Intent(Settings.ACTION_NFC_SETTINGS))
+        registerNfcStateReceiver()
+        startActivity(Intent(Settings.ACTION_NFC_SETTINGS))
+    }
+
+    private fun registerNfcStateReceiver() {
+        if (!isNfcStateReceiverRegistered) {
+            val filter = IntentFilter(NfcAdapter.ACTION_ADAPTER_STATE_CHANGED)
+            ContextCompat.registerReceiver(this, nfcStateReceiver, filter, ContextCompat.RECEIVER_EXPORTED)
+            isNfcStateReceiverRegistered = true
+        }
+    }
+
+    private fun unregisterNfcStateReceiver() {
+        if (isNfcStateReceiverRegistered) {
+            unregisterReceiver(nfcStateReceiver)
+            isNfcStateReceiverRegistered = false
+        }
     }
 
     private fun promptEnableWifi() {
