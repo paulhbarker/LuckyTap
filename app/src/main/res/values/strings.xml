@@ -3,7 +3,8 @@
     <string name="app_name">NFC App</string>
 
     <!-- NFC status messages -->
-    <string name="status_idle">Status: Idle. Select an action.</string>
+    <string name="status_idle">Ready. Select an action.</string>
+    <string name="status_waiting_for_connections">Waiting for connections…</string>
     <string name="status_invalid_number">Invalid number for writing.</string>
     <string name="status_ready_write">Ready to WRITE \'%1$s\'. Tap NFC Card.</string>
     <string name="status_scanning_read">Scanning for NFC tag (Read Mode)…</string>

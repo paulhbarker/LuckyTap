@@ -93,14 +93,9 @@ class NfcAppViewModel(application: Application) : AndroidViewModel(application) 
         if (isActive) {
             if (uiState == AppUiState.NORMAL) nfcMsg ?: str(R.string.status_idle) else ""
         } else {
-            val parts = mutableListOf<String>()
-            if (!wifiOk) parts += str(R.string.connection_wifi_not_connected, currentTargetWifiSsid)
-            if (wsState != WebSocketConnectionState.CONNECTED) {
-                parts += str(R.string.connection_ws_state, wsState.name.lowercase())
-            }
-            str(R.string.connection_status_prefix, parts.joinToString(". "))
+            str(R.string.status_waiting_for_connections)
         }
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, str(R.string.status_idle))
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, str(R.string.status_waiting_for_connections))
 
     private var _currentTargetWifiSsid: String = appPreferences.getEffectiveWifiSsid()
     val currentTargetWifiSsid: String get() = _currentTargetWifiSsid

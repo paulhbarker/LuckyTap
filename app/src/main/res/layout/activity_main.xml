@@ -192,6 +192,7 @@
 
             <!-- ─── Write Section ─── -->
             <TextView
+                android:tag="sectionWrite"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 style="@style/TextAppearance.NFCApp.SectionHeader"
@@ -231,6 +232,7 @@
 
             <!-- ─── Divider ─── -->
             <View
+                android:tag="dividerAdmin"
                 android:layout_width="match_parent"
                 android:layout_height="1dp"
                 android:layout_marginBottom="16dp"
@@ -238,6 +240,7 @@
 
             <!-- ─── Admin Section ─── -->
             <TextView
+                android:tag="sectionAdmin"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 style="@style/TextAppearance.NFCApp.SectionHeader"

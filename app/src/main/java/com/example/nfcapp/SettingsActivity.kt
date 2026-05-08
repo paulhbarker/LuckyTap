@@ -1,10 +1,11 @@
 package com.example.nfcapp
 
 import android.os.Bundle
-import android.widget.Button
 import android.widget.EditText
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import com.google.android.material.button.MaterialButton
+import com.google.android.material.textfield.TextInputLayout
 
 /**
  * Simple settings screen that lets the user override WiFi and WebSocket connection defaults.
@@ -18,8 +19,8 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var editWifiPassword: EditText
     private lateinit var editWsIp: EditText
     private lateinit var editWsPort: EditText
-    private lateinit var buttonSave: Button
-    private lateinit var buttonResetDefaults: Button
+    private lateinit var buttonSave: MaterialButton
+    private lateinit var buttonResetDefaults: MaterialButton
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -55,11 +56,17 @@ class SettingsActivity : AppCompatActivity() {
         editWsIp.setText(appPreferences.wsIpOverride ?: "")
         editWsPort.setText(appPreferences.wsPortOverride ?: "")
 
-        // Set hints showing the default values
-        editWifiSsid.hint = getString(R.string.hint_default_value, AppPreferences.DEFAULT_WIFI_SSID)
-        editWifiPassword.hint = getString(R.string.hint_default_value, AppPreferences.DEFAULT_WIFI_PASSWORD)
-        editWsIp.hint = getString(R.string.hint_default_value, AppPreferences.DEFAULT_WS_IP)
-        editWsPort.hint = getString(R.string.hint_default_value, AppPreferences.DEFAULT_WS_PORT)
+        // Show default values as helper text below each field
+        setHelperText(R.id.editWifiSsid, AppPreferences.DEFAULT_WIFI_SSID)
+        setHelperText(R.id.editWifiPassword, AppPreferences.DEFAULT_WIFI_PASSWORD)
+        setHelperText(R.id.editWsIp, AppPreferences.DEFAULT_WS_IP)
+        setHelperText(R.id.editWsPort, AppPreferences.DEFAULT_WS_PORT)
+    }
+
+    private fun setHelperText(editTextId: Int, defaultValue: String) {
+        val editText = findViewById<EditText>(editTextId)
+        val layout = editText.parent?.parent as? TextInputLayout
+        layout?.helperText = getString(R.string.hint_default_value, defaultValue)
     }
 
     private fun saveSettings() {

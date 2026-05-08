@@ -687,12 +687,20 @@ class MainActivity : AppCompatActivity() {
         buttonReadNfc.visibility = actionVisibility
         buttonCheckInNfc.visibility = actionVisibility
         buttonCheckOutNfc.visibility = actionVisibility
-        // Write section
+        // Check In/Out row container
+        (buttonCheckInNfc.parent as? View)?.visibility = actionVisibility
+        // Write section (header + divider above it + input + button)
         findViewById<View>(R.id.editTextNumberLayout).visibility = actionVisibility
         buttonWriteNfc.visibility = actionVisibility
         // Admin section
         buttonResetGame.visibility = actionVisibility
         buttonClearScans.visibility = actionVisibility
+        // Admin row container
+        (buttonResetGame.parent as? View)?.visibility = actionVisibility
+        // Section headers and dividers — find by iterating tagged views
+        mainContentLayout.findViewWithTag<View>("sectionWrite")?.visibility = actionVisibility
+        mainContentLayout.findViewWithTag<View>("sectionAdmin")?.visibility = actionVisibility
+        mainContentLayout.findViewWithTag<View>("dividerAdmin")?.visibility = actionVisibility
         // Connection card is always visible in NORMAL state
         connectionCard.visibility = View.VISIBLE
     }
