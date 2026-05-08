@@ -13,16 +13,36 @@ val localProperties = Properties().apply {
 fun localProp(key: String, fallback: String): String =
     localProperties.getProperty(key, fallback)
 
+// Allow versionName / versionCode to be overridden from the command line, e.g. in CI:
+//   ./gradlew assembleRelease -PversionName=1.2.3 -PversionCode=10203
+val ciVersionName: String = project.findProperty("versionName") as String? ?: "1.0"
+val ciVersionCode: Int = (project.findProperty("versionCode") as String?)?.toIntOrNull() ?: 1
+
 android {
     namespace = "com.luckytap.app"
     compileSdk = 36
+
+    signingConfigs {
+        create("release") {
+            val storeFilePath = System.getenv("SIGNING_STORE_FILE") ?: ""
+            val storePass    = System.getenv("SIGNING_STORE_PASSWORD") ?: ""
+            val alias        = System.getenv("SIGNING_KEY_ALIAS") ?: ""
+            val keyPass      = System.getenv("SIGNING_KEY_PASSWORD") ?: ""
+            if (storeFilePath.isNotEmpty()) {
+                storeFile     = file(storeFilePath)
+                storePassword = storePass
+                keyAlias      = alias
+                keyPassword   = keyPass
+            }
+        }
+    }
 
     defaultConfig {
         applicationId = "com.luckytap.app"
         minSdk = 23
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = ciVersionCode
+        versionName = ciVersionName
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -45,6 +65,10 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
+            val releaseSigning = signingConfigs.getByName("release")
+            if (releaseSigning.storeFile != null) {
+                signingConfig = releaseSigning
+            }
         }
     }
     compileOptions {
