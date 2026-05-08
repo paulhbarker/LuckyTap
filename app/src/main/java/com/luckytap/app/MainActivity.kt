@@ -175,6 +175,7 @@ class MainActivity : AppCompatActivity() {
                     val networkInfo = IntentCompat.getParcelableExtra(
                         intent, WifiManager.EXTRA_NETWORK_INFO, android.net.NetworkInfo::class.java
                     )
+                    @Suppress("DEPRECATION")
                     if (networkInfo?.isConnected == true) {
                         val isTarget = wifiController.isCurrentlyConnectedToTarget(appPreferences.getEffectiveWifiSsid())
                         viewModel.setWifiConnected(connected = isTarget)

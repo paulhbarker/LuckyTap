@@ -2,7 +2,6 @@ import java.util.Properties
 
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
 }
 
 // Load local.properties for secret defaults (file is gitignored)
@@ -55,9 +54,10 @@ android {
         // Required if minSdk is ever lowered below 26, and is a zero-cost defensive measure otherwise.
         isCoreLibraryDesugaringEnabled = true
     }
-    kotlinOptions {
-        jvmTarget = "11"
-    }
+}
+
+kotlin {
+    jvmToolchain(11)
 }
 
 dependencies {
