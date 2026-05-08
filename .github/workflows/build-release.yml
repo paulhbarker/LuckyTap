@@ -73,9 +73,11 @@ jobs:
       - name: Upload APK to release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.version.outputs.tag }}
           files: app/build/outputs/apk/release/*.apk
 
       - name: Upload AAB to release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.version.outputs.tag }}
           files: app/build/outputs/bundle/release/*.aab
