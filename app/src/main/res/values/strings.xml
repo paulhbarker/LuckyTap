@@ -29,6 +29,7 @@
     <string name="toast_no_connection">Cannot send: No connection</string>
     <string name="toast_ws_retries_exhausted">WebSocket connection failed after %1$d attempts.</string>
     <string name="toast_nfc_not_available">NFC is not available on this device.</string>
+    <string name="toast_enable_nfc">Please enable NFC to use this app.</string>
     <string name="toast_location_permission_essential">Fine Location permission is essential for WiFi features.</string>
     <string name="toast_location_permission_settings">Location permission permanently denied. Please enable it in App Settings.</string>
     <string name="toast_permissions_not_granted">Some required permissions were not granted.</string>
@@ -49,11 +50,15 @@
     <string name="nfc_invalid_number_at_tap">Invalid number at time of tap.</string>
 
     <!-- Connection card -->
+    <string name="connection_label_nfc">NFC</string>
     <string name="connection_label_wifi">WiFi</string>
     <string name="connection_label_server">Server</string>
     <string name="connection_value_connected">Connected</string>
     <string name="connection_value_connecting">Connecting…</string>
     <string name="connection_value_disconnected">Disconnected</string>
+    <string name="connection_nfc_available">Available</string>
+    <string name="connection_nfc_disabled">Disabled</string>
+    <string name="connection_nfc_unavailable">Unavailable</string>
 
     <!-- Section headers -->
     <string name="section_write">Write NFC</string>
@@ -86,6 +91,8 @@
     <string name="cd_ws_status_connected">WebSocket connected</string>
     <string name="cd_ws_status_connecting">WebSocket connecting</string>
     <string name="cd_ws_status_disconnected">WebSocket disconnected</string>
+    <string name="cd_nfc_status_enabled">NFC enabled</string>
+    <string name="cd_nfc_status_disabled">NFC disabled</string>
     <string name="cd_scanning_bar">Scanning indicator</string>
     <string name="cd_scanned_number">Scanned number: %1$s</string>
 </resources>

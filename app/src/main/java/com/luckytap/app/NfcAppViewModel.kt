@@ -20,6 +20,7 @@ import org.json.JSONObject
 // --- Enums ---
 enum class NfcOperationMode { NONE, WRITE, READ, CHECK_IN, CHECK_OUT }
 enum class AppUiState { NORMAL, SCANNING, SUCCESS_DISPLAY }
+enum class NfcState { AVAILABLE, DISABLED, UNAVAILABLE }
 enum class WebSocketConnectionState { DISCONNECTED, CONNECTING, CONNECTED, CLOSING }
 
 // --- Data classes ---
@@ -66,6 +67,19 @@ class NfcAppViewModel(application: Application) : AndroidViewModel(application) 
     private val _isWriteButtonEnabled = MutableStateFlow(false)
     val isWriteButtonEnabled: StateFlow<Boolean> = _isWriteButtonEnabled.asStateFlow()
 
+    // --- NFC state ---
+    private val _nfcState = MutableStateFlow(NfcState.DISABLED)
+    val nfcState: StateFlow<NfcState> = _nfcState.asStateFlow()
+
+    // Convenience for connection checks
+    private val _isNfcEnabled = MutableStateFlow(false)
+    val isNfcEnabled: StateFlow<Boolean> = _isNfcEnabled.asStateFlow()
+
+    fun setNfcState(state: NfcState) {
+        _nfcState.value = state
+        _isNfcEnabled.value = state == NfcState.AVAILABLE
+    }
+
     // --- WiFi connection state ---
     private val _isWifiConnectedToTarget = MutableStateFlow(false)
     val isWifiConnectedToTarget: StateFlow<Boolean> = _isWifiConnectedToTarget.asStateFlow()
@@ -76,10 +90,11 @@ class NfcAppViewModel(application: Application) : AndroidViewModel(application) 
 
     // --- Combined connection status ---
     val areEssentialConnectionsActive: StateFlow<Boolean> = combine(
+        _isNfcEnabled,
         _isWifiConnectedToTarget,
         webSocketConnectionState,
-    ) { wifiConnected, wsState ->
-        wifiConnected && wsState == WebSocketConnectionState.CONNECTED
+    ) { nfcEnabled, wifiConnected, wsState ->
+        nfcEnabled && wifiConnected && wsState == WebSocketConnectionState.CONNECTED
     }.stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
     /** Pre-computed connection status text for the Activity to display directly. */
@@ -89,8 +104,17 @@ class NfcAppViewModel(application: Application) : AndroidViewModel(application) 
         webSocketConnectionState,
         _nfcStatusMessage,
         _uiState,
-    ) { isActive, wifiOk, wsState, nfcMsg, uiState ->
-        if (isActive) {
+        _isNfcEnabled,
+    ) { array ->
+        val isActive = array[0] as Boolean
+        val wifiOk = array[1] as Boolean
+        val wsState = array[2] as WebSocketConnectionState
+        val nfcMsg = array[3] as String?
+        val uiState = array[4] as AppUiState
+        val nfcEnabled = array[5] as Boolean
+        if (!nfcEnabled) {
+            str(R.string.toast_enable_nfc)
+        } else if (isActive) {
             if (uiState == AppUiState.NORMAL) nfcMsg ?: str(R.string.status_idle) else ""
         } else {
             str(R.string.status_waiting_for_connections)

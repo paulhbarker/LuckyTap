@@ -69,6 +69,8 @@ class MainActivity : AppCompatActivity() {
 
     // --- Connection Card Views ---
     private lateinit var connectionCard: MaterialCardView
+    private lateinit var nfcStatusDot: View
+    private lateinit var nfcStatusValue: TextView
     private lateinit var wifiStatusDot: View
     private lateinit var wifiSpinner: ProgressBar
     private lateinit var wifiStatusValue: TextView
@@ -160,6 +162,13 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+    private var hasPromptedNfcThisResume = false
+
+    private val nfcEnableLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+            updateNfcState() // just update UI, don't re-prompt
+        }
+
     private val settingsLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
             viewModel.onPreferencesChanged()
@@ -222,6 +231,12 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        hasPromptedNfcThisResume = false
+        updateNfcState()
+        if (viewModel.nfcState.value == NfcState.DISABLED && !hasPromptedNfcThisResume) {
+            hasPromptedNfcThisResume = true
+            promptEnableNfc()
+        }
         nfcAdapter?.enableForegroundDispatch(this, pendingIntent, intentFiltersArray, techListsArray)
 
         // Only register WiFi receiver if we have the necessary permissions
@@ -312,6 +327,8 @@ class MainActivity : AppCompatActivity() {
 
         // Connection card
         connectionCard = findViewById(R.id.connectionCard)
+        nfcStatusDot = findViewById(R.id.nfcStatusDot)
+        nfcStatusValue = findViewById(R.id.nfcStatusValue)
         wifiStatusDot = findViewById(R.id.wifiStatusDot)
         wifiSpinner = findViewById(R.id.wifiSpinner)
         wifiStatusValue = findViewById(R.id.wifiStatusValue)
@@ -398,6 +415,7 @@ class MainActivity : AppCompatActivity() {
                 launch { collectUiState() }
                 launch { collectNumberForSuccessDisplay() }
                 launch { collectIsWriteButtonEnabled() }
+                launch { collectNfcEnabledState() }
                 launch { collectWebSocketConnectionState() }
                 launch { collectWifiConnectionState() }
                 launch { collectAreEssentialConnectionsActive() }
@@ -430,6 +448,31 @@ class MainActivity : AppCompatActivity() {
     private suspend fun collectIsWriteButtonEnabled() {
         viewModel.isWriteButtonEnabled.collect { isEnabled ->
             buttonWriteNfc.isEnabled = isEnabled
+        }
+    }
+
+    private suspend fun collectNfcEnabledState() {
+        viewModel.nfcState.collect { state ->
+            when (state) {
+                NfcState.AVAILABLE -> {
+                    nfcStatusDot.backgroundTintList = ContextCompat.getColorStateList(this@MainActivity, R.color.status_connected)
+                    nfcStatusValue.text = getString(R.string.connection_nfc_available)
+                    nfcStatusValue.setTextColor(ContextCompat.getColor(this@MainActivity, R.color.status_connected))
+                    nfcStatusDot.contentDescription = getString(R.string.cd_nfc_status_enabled)
+                }
+                NfcState.DISABLED -> {
+                    nfcStatusDot.backgroundTintList = ContextCompat.getColorStateList(this@MainActivity, R.color.status_disconnected)
+                    nfcStatusValue.text = getString(R.string.connection_nfc_disabled)
+                    nfcStatusValue.setTextColor(ContextCompat.getColor(this@MainActivity, R.color.status_disconnected))
+                    nfcStatusDot.contentDescription = getString(R.string.cd_nfc_status_disabled)
+                }
+                NfcState.UNAVAILABLE -> {
+                    nfcStatusDot.backgroundTintList = ContextCompat.getColorStateList(this@MainActivity, R.color.status_disconnected)
+                    nfcStatusValue.text = getString(R.string.connection_nfc_unavailable)
+                    nfcStatusValue.setTextColor(ContextCompat.getColor(this@MainActivity, R.color.status_disconnected))
+                    nfcStatusDot.contentDescription = getString(R.string.cd_nfc_status_disabled)
+                }
+            }
         }
     }
 
@@ -651,6 +694,22 @@ class MainActivity : AppCompatActivity() {
         val password = viewModel.getEffectiveWifiPasswordForActivity()
         Log.i("MainActivity", "Initiating WiFi connection to '$ssid'")
         wifiController.connectToWifi(applicationContext, ssid, password)
+    }
+
+    private fun updateNfcState() {
+        val adapter = nfcAdapter
+        if (adapter == null) {
+            viewModel.setNfcState(NfcState.UNAVAILABLE)
+        } else if (adapter.isEnabled) {
+            viewModel.setNfcState(NfcState.AVAILABLE)
+        } else {
+            viewModel.setNfcState(NfcState.DISABLED)
+        }
+    }
+
+    private fun promptEnableNfc() {
+        Toast.makeText(this, R.string.toast_enable_nfc, Toast.LENGTH_LONG).show()
+        nfcEnableLauncher.launch(Intent(Settings.ACTION_NFC_SETTINGS))
     }
 
     private fun promptEnableWifi() {
