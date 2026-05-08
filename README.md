@@ -104,14 +104,6 @@ luckytap.storeFile=luckytap-release.jks
 luckytap.storePassword=your_keystore_password
 ```
 
-## Screenshots
-
-<!-- Add screenshots here -->
-
-| Main Screen | Scanning | Settings |
-|---|---|---|
-| ![Main](screenshots/main.png) | ![Scanning](screenshots/scanning.png) | ![Settings](screenshots/settings.png) |
-
 ## License
 
 <!-- Add your license here -->
