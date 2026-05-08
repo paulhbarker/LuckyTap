@@ -47,6 +47,7 @@ class NfcAppViewModel(application: Application) : AndroidViewModel(application) 
     private val webSocketManager = WebSocketManager(
         scope = viewModelScope,
         getWebSocketUrl = { appPreferences.getEffectiveWebSocketUrl() },
+        canConnect = { _isWifiConnectedToTarget.value },
     )
     val webSocketConnectionState: StateFlow<WebSocketConnectionState> = webSocketManager.connectionState
 

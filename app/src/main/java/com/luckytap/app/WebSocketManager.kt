@@ -27,6 +27,7 @@ import java.util.concurrent.TimeUnit
 class WebSocketManager(
     private val scope: CoroutineScope,
     private val getWebSocketUrl: () -> String,
+    private val canConnect: () -> Boolean = { true },
 ) {
     companion object {
         private const val TAG = "WebSocketManager"
@@ -52,6 +53,11 @@ class WebSocketManager(
 
     fun connect(url: String) {
         retryJob?.cancel()
+
+        if (!canConnect()) {
+            Log.d(TAG, "connect() blocked — prerequisite not met (e.g. WiFi not connected).")
+            return
+        }
 
         if (webSocket != null &&
             (_connectionState.value == WebSocketConnectionState.CONNECTING ||
@@ -112,7 +118,12 @@ class WebSocketManager(
 
     fun send(type: String, payload: Any): Boolean {
         if (_connectionState.value == WebSocketConnectionState.DISCONNECTED) {
-            connect(getWebSocketUrl())
+            if (canConnect()) {
+                connect(getWebSocketUrl())
+            } else {
+                Log.d(TAG, "send() skipping auto-reconnect — prerequisite not met.")
+                return false
+            }
         }
 
         return try {
@@ -126,7 +137,7 @@ class WebSocketManager(
                 Log.d(TAG, "Sent: $jsonMessage")
             } else {
                 Log.w(TAG, "Failed to send: $jsonMessage (state=${_connectionState.value})")
-                connect(getWebSocketUrl())
+                if (canConnect()) connect(getWebSocketUrl())
             }
             success
         } catch (e: JSONException) {
@@ -156,8 +167,11 @@ class WebSocketManager(
         Log.d(TAG, "Scheduling WebSocket retry #$retryCount in ${delayMs}ms for $url")
         retryJob = scope.launch {
             delay(delayMs)
-            if (_connectionState.value == WebSocketConnectionState.DISCONNECTED) {
+            if (_connectionState.value == WebSocketConnectionState.DISCONNECTED && canConnect()) {
                 connect(url)
+            } else if (!canConnect()) {
+                Log.d(TAG, "Retry #$retryCount skipped — prerequisite not met. Resetting retry count.")
+                retryCount = 0
             }
         }
     }
