@@ -280,6 +280,7 @@ class WifiController(private val context: Context) {
             if (ssid != null && psk != null) {
                 Log.i(TAG, "Retrying WiFi connection to $ssid (attempt #$retryCount)")
                 disconnectFromWifi()
+                _connectionStatus.postValue(WifiConnectionState.CONNECTING)
                 currentTargetSsid = ssid
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     connectApi29Plus(ssid, psk)
