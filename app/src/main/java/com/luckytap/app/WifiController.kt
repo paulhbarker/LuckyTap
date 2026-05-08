@@ -151,8 +151,10 @@ class WifiController(private val context: Context) {
 
             override fun onLost(network: Network) {
                 super.onLost(network)
-                Log.w(TAG, "NetworkCallback: LOST for $ssid. Scheduling reconnect.")
+                Log.w(TAG, "NetworkCallback: LOST for $ssid. Will attempt to reconnect.")
+                connectivityManager.bindProcessToNetwork(null)
                 _connectionStatus.postValue(WifiConnectionState.DISCONNECTED)
+                resetRetryCount()
                 scheduleRetry()
             }
         }
