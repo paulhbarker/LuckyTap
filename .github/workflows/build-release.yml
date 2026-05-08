@@ -3,6 +3,12 @@ name: Build Release
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to build (e.g. v1.0.0)'
+        required: true
+        default: 'v1.0.0'
 
 jobs:
   build:
@@ -33,7 +39,8 @@ jobs:
       - name: Compute version from tag
         id: version
         run: |
-          TAG="${GITHUB_REF_NAME}"          # e.g. v1.2.3
+          # Use manual input tag if triggered via workflow_dispatch
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"  # e.g. v1.2.3
           VERSION="${TAG#v}"                # strip leading 'v' → 1.2.3
           IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
           MAJOR="${MAJOR:-1}"; MINOR="${MINOR:-0}"; PATCH="${PATCH:-0}"
