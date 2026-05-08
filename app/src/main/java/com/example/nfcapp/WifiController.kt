@@ -10,7 +10,6 @@ import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.net.wifi.WifiConfiguration
-import android.net.wifi.WifiInfo
 import android.net.wifi.WifiManager
 import android.net.wifi.WifiNetworkSpecifier
 import android.os.Build
@@ -234,26 +233,16 @@ class WifiController(private val context: Context) {
     fun isCurrentlyConnectedToTarget(targetSsidToCheck: String?): Boolean {
         if (targetSsidToCheck == null || !wifiManager.isWifiEnabled) return false
 
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            // API 31+: WifiManager.getConnectionInfo() is deprecated. Derive SSID from the
-            // active network's transport info via ConnectivityManager — no extra permissions needed.
-            val activeNetwork = connectivityManager.activeNetwork ?: return false
-            val caps = connectivityManager.getNetworkCapabilities(activeNetwork) ?: return false
-            if (!caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) return false
-            val wifiInfo = caps.transportInfo as? WifiInfo ?: return false
-            val currentSsid = wifiInfo.ssid?.replace("\"", "")
-            currentSsid == targetSsidToCheck &&
-                    _connectionStatus.value == WifiConnectionState.CONNECTED &&
-                    currentTargetSsid == targetSsidToCheck
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            // API 29–30: getConnectionInfo() still works but double-check via our tracked state
-            @Suppress("DEPRECATION")
-            val currentSsid = wifiManager.connectionInfo?.ssid?.replace("\"", "")
-            currentSsid == targetSsidToCheck &&
-                    _connectionStatus.value == WifiConnectionState.CONNECTED &&
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            // API 29+: connection is managed via WifiNetworkSpecifier whose NetworkCallback
+            // only fires onAvailable() for the exact SSID we requested. Querying
+            // ConnectivityManager.activeNetwork does NOT work here because specifier-based
+            // networks remove NET_CAPABILITY_INTERNET, so they never appear as the
+            // "active" internet-capable network. Trust our internal tracked state instead.
+            _connectionStatus.value == WifiConnectionState.CONNECTED &&
                     currentTargetSsid == targetSsidToCheck
         } else {
-            // API 21–28: legacy path
+            // API 23–28: legacy WifiConfiguration path — verify via WifiInfo.
             @Suppress("DEPRECATION")
             val connectionInfo = wifiManager.connectionInfo
             val currentSsid = connectionInfo?.ssid?.replace("\"", "")
