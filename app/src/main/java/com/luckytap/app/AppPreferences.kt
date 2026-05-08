@@ -123,6 +123,6 @@ class AppPreferences private constructor(context: Context) {
     fun getEffectiveWebSocketUrl(): String {
         val ip = getEffectiveWsIp()
         val port = getEffectiveWsPort()
-        return "ws://$ip:$port/ws/lucky-draw"
+        return "ws://$ip:$port/ws/lucky-tap"
     }
 }
