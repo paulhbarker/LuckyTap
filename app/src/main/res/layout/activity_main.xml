@@ -5,111 +5,304 @@
     android:id="@+id/rootLayout"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/default_background"
+    android:background="@color/background_dark"
     tools:context=".MainActivity">
 
-    <!-- WebSocket Connection Status Bar -->
-    <View
-        android:id="@+id/webSocketStatusIndicator"
-        android:layout_width="match_parent"
-        android:layout_height="32dp"
-        android:layout_gravity="top"
-        android:background="@color/ws_status_connecting"
-        android:contentDescription="@string/cd_ws_status_connecting"
-        android:importantForAccessibility="yes" />
-
-    <!-- Scrollable main content area -->
+    <!-- ============================================================ -->
+    <!-- Main content (scrollable)                                     -->
+    <!-- ============================================================ -->
     <ScrollView
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:layout_marginTop="32dp"
-        android:fillViewport="true">
+        android:fillViewport="true"
+        android:clipToPadding="false">
 
         <LinearLayout
             android:id="@+id/mainContentLayout"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:padding="32dp"
-            android:gravity="center">
+            android:paddingHorizontal="20dp"
+            android:paddingTop="24dp"
+            android:paddingBottom="32dp">
 
-            <EditText
-                android:id="@+id/editTextNumber"
+            <!-- ─── Connection Status Card ─── -->
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/connectionCard"
+                style="@style/Widget.NFCApp.ConnectionCard"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:hint="@string/hint_enter_number"
-                android:inputType="number"
-                android:importantForAutofill="no"
-                android:layout_marginBottom="16dp"/>
+                android:layout_marginBottom="24dp">
 
-            <Button
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
+
+                    <!-- WiFi row -->
+                    <LinearLayout
+                        android:id="@+id/wifiStatusRow"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:paddingVertical="6dp">
+
+                        <!-- Spinner (shown while connecting) -->
+                        <ProgressBar
+                            android:id="@+id/wifiSpinner"
+                            style="?android:attr/progressBarStyleSmall"
+                            android:layout_width="18dp"
+                            android:layout_height="18dp"
+                            android:indeterminate="true"
+                            android:indeterminateTint="@color/status_connecting"
+                            android:visibility="gone"
+                            tools:visibility="visible" />
+
+                        <!-- Status dot (shown when not spinning) -->
+                        <View
+                            android:id="@+id/wifiStatusDot"
+                            android:layout_width="10dp"
+                            android:layout_height="10dp"
+                            android:background="@drawable/status_dot"
+                            android:backgroundTint="@color/status_disconnected"
+                            android:layout_marginStart="4dp"
+                            android:layout_marginEnd="0dp" />
+
+                        <TextView
+                            android:id="@+id/wifiStatusLabel"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:layout_marginStart="12dp"
+                            android:text="@string/connection_label_wifi"
+                            android:textColor="@color/on_surface_medium_dark"
+                            android:textSize="14sp" />
+
+                        <TextView
+                            android:id="@+id/wifiStatusValue"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:textColor="@color/on_surface_dim_dark"
+                            android:textSize="13sp"
+                            tools:text="Connecting…" />
+                    </LinearLayout>
+
+                    <!-- Divider -->
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:layout_marginVertical="4dp"
+                        android:background="@color/divider_dark" />
+
+                    <!-- WebSocket row -->
+                    <LinearLayout
+                        android:id="@+id/wsStatusRow"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:paddingVertical="6dp">
+
+                        <ProgressBar
+                            android:id="@+id/wsSpinner"
+                            style="?android:attr/progressBarStyleSmall"
+                            android:layout_width="18dp"
+                            android:layout_height="18dp"
+                            android:indeterminate="true"
+                            android:indeterminateTint="@color/status_connecting"
+                            android:visibility="gone"
+                            tools:visibility="visible" />
+
+                        <View
+                            android:id="@+id/wsStatusDot"
+                            android:layout_width="10dp"
+                            android:layout_height="10dp"
+                            android:background="@drawable/status_dot"
+                            android:backgroundTint="@color/status_disconnected"
+                            android:layout_marginStart="4dp"
+                            android:layout_marginEnd="0dp" />
+
+                        <TextView
+                            android:id="@+id/wsStatusLabel"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:layout_marginStart="12dp"
+                            android:text="@string/connection_label_server"
+                            android:textColor="@color/on_surface_medium_dark"
+                            android:textSize="14sp" />
+
+                        <TextView
+                            android:id="@+id/wsStatusValue"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:textColor="@color/on_surface_dim_dark"
+                            android:textSize="13sp"
+                            tools:text="Disconnected" />
+                    </LinearLayout>
+
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- Hidden legacy view for code compat — the card replaces this visually -->
+            <View
+                android:id="@+id/webSocketStatusIndicator"
+                android:layout_width="0dp"
+                android:layout_height="0dp"
+                android:visibility="gone"
+                android:importantForAccessibility="no" />
+
+            <!-- ─── Primary Action: Start Scanning ─── -->
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/buttonReadNfc"
+                style="@style/Widget.NFCApp.Button.Primary"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/button_start_scanning"
+                android:layout_marginBottom="12dp"
+                app:icon="@android:drawable/ic_media_play"
+                app:iconGravity="end" />
+
+            <!-- ─── Check In / Check Out row ─── -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginBottom="24dp">
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/buttonCheckInNfc"
+                    style="@style/Widget.NFCApp.Button.Secondary"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/button_check_in"
+                    android:layout_marginEnd="6dp" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/buttonCheckOutNfc"
+                    style="@style/Widget.NFCApp.Button.Secondary"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/button_check_out"
+                    android:layout_marginStart="6dp" />
+            </LinearLayout>
+
+            <!-- ─── Write Section ─── -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                style="@style/TextAppearance.NFCApp.SectionHeader"
+                android:text="@string/section_write"
+                android:layout_marginBottom="8dp" />
+
+            <com.google.android.material.textfield.TextInputLayout
+                android:id="@+id/editTextNumberLayout"
+                style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="8dp"
+                android:hint="@string/hint_enter_number"
+                app:boxCornerRadiusTopStart="12dp"
+                app:boxCornerRadiusTopEnd="12dp"
+                app:boxCornerRadiusBottomStart="12dp"
+                app:boxCornerRadiusBottomEnd="12dp"
+                app:boxStrokeColor="@color/outline_dark"
+                app:hintTextColor="@color/on_surface_dim_dark">
+
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/editTextNumber"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="number"
+                    android:importantForAutofill="no"
+                    android:textColor="@color/on_surface_dark" />
+            </com.google.android.material.textfield.TextInputLayout>
+
+            <com.google.android.material.button.MaterialButton
                 android:id="@+id/buttonWriteNfc"
+                style="@style/Widget.NFCApp.Button.Write"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="@string/button_write_nfc"
-                android:layout_marginBottom="8dp"/>
+                android:layout_marginBottom="24dp" />
 
-            <Button
-                android:id="@+id/buttonReadNfc"
+            <!-- ─── Divider ─── -->
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:layout_marginBottom="16dp"
+                android:background="@color/divider_dark" />
+
+            <!-- ─── Admin Section ─── -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                style="@style/TextAppearance.NFCApp.SectionHeader"
+                android:text="@string/section_admin"
+                android:layout_marginBottom="8dp" />
+
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:backgroundTint="@color/success_green"
-                android:textColor="@color/white"
-                android:text="@string/button_start_scanning"
-                android:layout_marginBottom="32dp"/>
+                android:orientation="horizontal"
+                android:layout_marginBottom="16dp">
 
-            <Button
-                android:id="@+id/buttonCheckInNfc"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="@string/button_check_in"
-                android:layout_marginBottom="8dp"/>
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/buttonClearScans"
+                    style="@style/Widget.NFCApp.Button.Destructive"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/button_clear_scans"
+                    android:layout_marginEnd="6dp" />
 
-            <Button
-                android:id="@+id/buttonCheckOutNfc"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="@string/button_check_out"
-                android:layout_marginBottom="32dp"/>
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/buttonResetGame"
+                    style="@style/Widget.NFCApp.Button.Destructive"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/button_reset_game"
+                    android:layout_marginStart="6dp" />
+            </LinearLayout>
 
-            <Button
-                android:id="@+id/buttonClearScans"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="@string/button_clear_scans"
-                android:textColor="@color/white"
-                android:backgroundTint="@color/error_red"
-                android:layout_marginBottom="8dp"/>
-
-            <Button
-                android:id="@+id/buttonResetGame"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="@string/button_reset_game"
-                android:textColor="@color/white"
-                android:backgroundTint="@color/error_red"
-                android:layout_marginBottom="32dp"/>
-
+            <!-- ─── Status text ─── -->
             <TextView
                 android:id="@+id/textViewStatus"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="@string/status_idle"
-                android:textSize="18sp"
+                android:textSize="14sp"
+                android:textColor="@color/on_surface_dim_dark"
                 android:gravity="center"
-                android:padding="8dp"/>
+                android:padding="8dp"
+                android:layout_marginBottom="8dp" />
 
-            <Button
+            <!-- Spacer to push settings to bottom -->
+            <View
+                android:layout_width="0dp"
+                android:layout_height="0dp"
+                android:layout_weight="1" />
+
+            <!-- ─── Settings button ─── -->
+            <com.google.android.material.button.MaterialButton
                 android:id="@+id/buttonSettings"
-                style="?android:attr/borderlessButtonStyle"
+                style="@style/Widget.NFCApp.Button.Text"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="@string/button_settings"
-                android:layout_marginTop="16dp"/>
+                app:icon="@android:drawable/ic_menu_preferences"
+                app:iconGravity="textStart" />
+
         </LinearLayout>
     </ScrollView>
 
-    <!-- Scanning Bar -->
+    <!-- ============================================================ -->
+    <!-- Scanning Bar (overlay — unchanged behavior)                   -->
+    <!-- ============================================================ -->
     <View
         android:id="@+id/scanningBar"
         android:layout_width="match_parent"
@@ -118,7 +311,9 @@
         android:contentDescription="@string/cd_scanning_bar"
         android:visibility="gone" />
 
-    <!-- Success Number Display -->
+    <!-- ============================================================ -->
+    <!-- Success Number Display (overlay — unchanged behavior)         -->
+    <!-- ============================================================ -->
     <TextView
         android:id="@+id/textViewSuccessNumber"
         android:layout_width="wrap_content"

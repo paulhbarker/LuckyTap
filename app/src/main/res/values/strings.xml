@@ -47,6 +47,17 @@
     <string name="nfc_no_operation">NFC detected, but no operation selected.</string>
     <string name="nfc_invalid_number_at_tap">Invalid number at time of tap.</string>
 
+    <!-- Connection card -->
+    <string name="connection_label_wifi">WiFi</string>
+    <string name="connection_label_server">Server</string>
+    <string name="connection_value_connected">Connected</string>
+    <string name="connection_value_connecting">Connecting…</string>
+    <string name="connection_value_disconnected">Disconnected</string>
+
+    <!-- Section headers -->
+    <string name="section_write">Write NFC</string>
+    <string name="section_admin">Admin</string>
+
     <!-- Layout strings -->
     <string name="hint_enter_number">Enter number (1–100) to write</string>
     <string name="button_write_nfc">WRITE to NFC</string>

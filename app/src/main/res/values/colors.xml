@@ -3,13 +3,45 @@
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
 
-    <!-- App colors -->
-    <color name="success_green">#4CAF50</color>
-    <color name="error_red">#F44336</color>
-    <color name="default_background">#FFFFFFFF</color>
-    <color name="scanning_background_black">#000000</color>
+    <!-- Dark theme surface palette -->
+    <color name="background_dark">#FF121212</color>
+    <color name="surface_dark">#FF1E1E1E</color>
+    <color name="surface_variant_dark">#FF2C2C2C</color>
+    <color name="on_surface_dark">#FFFFFFFF</color>
+    <color name="on_surface_medium_dark">#B3FFFFFF</color>  <!-- 70% white -->
+    <color name="on_surface_dim_dark">#66FFFFFF</color>     <!-- 40% white -->
+    <color name="outline_dark">#FF3C3C3C</color>
 
-    <color name="ws_status_connecting">#FFAB40</color>
-    <color name="ws_status_connected">#66BB6A</color>
-    <color name="ws_status_disconnected">#EF5350</color>
+    <!-- Accent colors -->
+    <color name="primary_green">#FF66BB6A</color>
+    <color name="primary_green_muted">#FF388E3C</color>
+    <color name="on_primary">#FF121212</color>
+    <color name="secondary_blue">#FF64B5F6</color>
+    <color name="on_secondary">#FF121212</color>
+    <color name="tertiary_amber">#FFFFB74D</color>
+
+    <!-- Semantic colors -->
+    <color name="success_green">#FF4CAF50</color>
+    <color name="error_red">#FFEF5350</color>
+    <color name="error_red_muted">#FFD32F2F</color>
+    <color name="warning_amber">#FFFFAB40</color>
+    <color name="default_background">@color/background_dark</color>
+    <color name="scanning_background_black">#FF000000</color>
+
+    <!-- Connection status dots -->
+    <color name="status_connected">#FF66BB6A</color>
+    <color name="status_connecting">#FFFFAB40</color>
+    <color name="status_disconnected">#FFEF5350</color>
+
+    <!-- WebSocket status bar (kept for backwards compat) -->
+    <color name="ws_status_connecting">@color/status_connecting</color>
+    <color name="ws_status_connected">@color/status_connected</color>
+    <color name="ws_status_disconnected">@color/status_disconnected</color>
+
+    <!-- Button colors -->
+    <color name="button_destructive">#FF2C2C2C</color>
+    <color name="button_destructive_stroke">#66EF5350</color>
+
+    <!-- Divider -->
+    <color name="divider_dark">#33FFFFFF</color>
 </resources>

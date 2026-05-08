@@ -28,12 +28,14 @@ import android.view.View
 import android.view.WindowManager
 import android.view.animation.AccelerateDecelerateInterpolator
 import android.view.inputmethod.InputMethodManager
-import android.widget.Button
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
+import com.google.android.material.button.MaterialButton
+import com.google.android.material.card.MaterialCardView
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
@@ -49,19 +51,28 @@ class MainActivity : AppCompatActivity() {
 
     // --- Views ---
     private lateinit var editTextNumber: EditText
-    private lateinit var buttonWriteNfc: Button
-    private lateinit var buttonReadNfc: Button
+    private lateinit var buttonWriteNfc: MaterialButton
+    private lateinit var buttonReadNfc: MaterialButton
     private lateinit var textViewStatus: TextView
     private lateinit var rootLayout: FrameLayout
     private lateinit var mainContentLayout: LinearLayout
     private lateinit var textViewSuccessNumber: TextView
     private lateinit var scanningBar: View
-    private lateinit var buttonCheckInNfc: Button
-    private lateinit var buttonCheckOutNfc: Button
+    private lateinit var buttonCheckInNfc: MaterialButton
+    private lateinit var buttonCheckOutNfc: MaterialButton
     private lateinit var webSocketStatusIndicator: View
-    private lateinit var buttonResetGame: Button
-    private lateinit var buttonClearScans: Button
-    private lateinit var buttonSettings: Button
+    private lateinit var buttonResetGame: MaterialButton
+    private lateinit var buttonClearScans: MaterialButton
+    private lateinit var buttonSettings: MaterialButton
+
+    // --- Connection Card Views ---
+    private lateinit var connectionCard: MaterialCardView
+    private lateinit var wifiStatusDot: View
+    private lateinit var wifiSpinner: ProgressBar
+    private lateinit var wifiStatusValue: TextView
+    private lateinit var wsStatusDot: View
+    private lateinit var wsSpinner: ProgressBar
+    private lateinit var wsStatusValue: TextView
 
     // --- NFC ---
     private var nfcAdapter: NfcAdapter? = null
@@ -291,6 +302,15 @@ class MainActivity : AppCompatActivity() {
         buttonResetGame = findViewById(R.id.buttonResetGame)
         buttonClearScans = findViewById(R.id.buttonClearScans)
         buttonSettings = findViewById(R.id.buttonSettings)
+
+        // Connection card
+        connectionCard = findViewById(R.id.connectionCard)
+        wifiStatusDot = findViewById(R.id.wifiStatusDot)
+        wifiSpinner = findViewById(R.id.wifiSpinner)
+        wifiStatusValue = findViewById(R.id.wifiStatusValue)
+        wsStatusDot = findViewById(R.id.wsStatusDot)
+        wsSpinner = findViewById(R.id.wsSpinner)
+        wsStatusValue = findViewById(R.id.wsStatusValue)
     }
 
     @SuppressLint("WrongConstant")
@@ -366,6 +386,7 @@ class MainActivity : AppCompatActivity() {
                 launch { collectNumberForSuccessDisplay() }
                 launch { collectIsWriteButtonEnabled() }
                 launch { collectWebSocketConnectionState() }
+                launch { collectWifiConnectionState() }
                 launch { collectAreEssentialConnectionsActive() }
                 launch { collectConnectionStatusText() }
                 launch { collectUiEvents() }
@@ -401,24 +422,60 @@ class MainActivity : AppCompatActivity() {
 
     private suspend fun collectWebSocketConnectionState() {
         viewModel.webSocketConnectionState.collect { state ->
-            val colorRes = when (state) {
-                WebSocketConnectionState.CONNECTED -> R.color.ws_status_connected
-                WebSocketConnectionState.CONNECTING,
-                WebSocketConnectionState.CLOSING,
-                -> R.color.ws_status_connecting
-                WebSocketConnectionState.DISCONNECTED -> R.color.ws_status_disconnected
+            when (state) {
+                WebSocketConnectionState.CONNECTED -> {
+                    wsSpinner.visibility = View.GONE
+                    wsStatusDot.visibility = View.VISIBLE
+                    wsStatusDot.backgroundTintList = ContextCompat.getColorStateList(this@MainActivity, R.color.status_connected)
+                    wsStatusValue.text = getString(R.string.connection_value_connected)
+                    wsStatusValue.setTextColor(ContextCompat.getColor(this@MainActivity, R.color.status_connected))
+                }
+                WebSocketConnectionState.CONNECTING, WebSocketConnectionState.CLOSING -> {
+                    wsSpinner.visibility = View.VISIBLE
+                    wsStatusDot.visibility = View.GONE
+                    wsStatusValue.text = getString(R.string.connection_value_connecting)
+                    wsStatusValue.setTextColor(ContextCompat.getColor(this@MainActivity, R.color.status_connecting))
+                }
+                WebSocketConnectionState.DISCONNECTED -> {
+                    wsSpinner.visibility = View.GONE
+                    wsStatusDot.visibility = View.VISIBLE
+                    wsStatusDot.backgroundTintList = ContextCompat.getColorStateList(this@MainActivity, R.color.status_disconnected)
+                    wsStatusValue.text = getString(R.string.connection_value_disconnected)
+                    wsStatusValue.setTextColor(ContextCompat.getColor(this@MainActivity, R.color.status_disconnected))
+                }
             }
-            webSocketStatusIndicator.setBackgroundColor(ContextCompat.getColor(this@MainActivity, colorRes))
 
-            // Update accessibility content description
+            // Keep accessibility content description
             val descRes = when (state) {
                 WebSocketConnectionState.CONNECTED -> R.string.cd_ws_status_connected
-                WebSocketConnectionState.CONNECTING,
-                WebSocketConnectionState.CLOSING,
-                -> R.string.cd_ws_status_connecting
+                WebSocketConnectionState.CONNECTING, WebSocketConnectionState.CLOSING -> R.string.cd_ws_status_connecting
                 WebSocketConnectionState.DISCONNECTED -> R.string.cd_ws_status_disconnected
             }
             webSocketStatusIndicator.contentDescription = getString(descRes)
+        }
+    }
+
+    private suspend fun collectWifiConnectionState() {
+        viewModel.isWifiConnectedToTarget.collect { connected ->
+            if (connected) {
+                wifiSpinner.visibility = View.GONE
+                wifiStatusDot.visibility = View.VISIBLE
+                wifiStatusDot.backgroundTintList = ContextCompat.getColorStateList(this@MainActivity, R.color.status_connected)
+                wifiStatusValue.text = getString(R.string.connection_value_connected)
+                wifiStatusValue.setTextColor(ContextCompat.getColor(this@MainActivity, R.color.status_connected))
+            } else {
+                // Show spinner when we're actively trying to connect (not in ERROR/idle)
+                val isConnecting = wifiController.connectionStatus.value == WifiController.WifiConnectionState.CONNECTING
+                wifiSpinner.visibility = if (isConnecting) View.VISIBLE else View.GONE
+                wifiStatusDot.visibility = if (isConnecting) View.GONE else View.VISIBLE
+                if (!isConnecting) {
+                    wifiStatusDot.backgroundTintList = ContextCompat.getColorStateList(this@MainActivity, R.color.status_disconnected)
+                }
+                wifiStatusValue.text = if (isConnecting) getString(R.string.connection_value_connecting) else getString(R.string.connection_value_disconnected)
+                wifiStatusValue.setTextColor(ContextCompat.getColor(this@MainActivity,
+                    if (isConnecting) R.color.status_connecting else R.color.status_disconnected
+                ))
+            }
         }
     }
 
@@ -427,6 +484,31 @@ class MainActivity : AppCompatActivity() {
         wifiController.connectionStatus.observe(this) { state ->
             val isConnected = state == WifiController.WifiConnectionState.CONNECTED
             viewModel.setWifiConnected(isConnected)
+
+            // Update connection card spinner/dot for WiFi
+            when (state) {
+                WifiController.WifiConnectionState.CONNECTING -> {
+                    wifiSpinner.visibility = View.VISIBLE
+                    wifiStatusDot.visibility = View.GONE
+                    wifiStatusValue.text = getString(R.string.connection_value_connecting)
+                    wifiStatusValue.setTextColor(ContextCompat.getColor(this, R.color.status_connecting))
+                }
+                WifiController.WifiConnectionState.CONNECTED -> {
+                    wifiSpinner.visibility = View.GONE
+                    wifiStatusDot.visibility = View.VISIBLE
+                    wifiStatusDot.backgroundTintList = ContextCompat.getColorStateList(this, R.color.status_connected)
+                    wifiStatusValue.text = getString(R.string.connection_value_connected)
+                    wifiStatusValue.setTextColor(ContextCompat.getColor(this, R.color.status_connected))
+                }
+                WifiController.WifiConnectionState.ERROR,
+                WifiController.WifiConnectionState.DISCONNECTED -> {
+                    wifiSpinner.visibility = View.GONE
+                    wifiStatusDot.visibility = View.VISIBLE
+                    wifiStatusDot.backgroundTintList = ContextCompat.getColorStateList(this, R.color.status_disconnected)
+                    wifiStatusValue.text = getString(R.string.connection_value_disconnected)
+                    wifiStatusValue.setTextColor(ContextCompat.getColor(this, R.color.status_disconnected))
+                }
+            }
 
             if (state == WifiController.WifiConnectionState.ERROR) {
                 val wifiManager = applicationContext.getSystemService(WIFI_SERVICE) as WifiManager
@@ -600,21 +682,25 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateButtonVisibility(areConnectionsActive: Boolean) {
         if (viewModel.uiState.value != AppUiState.NORMAL) return
-        val visibility = if (areConnectionsActive) View.VISIBLE else View.GONE
-        editTextNumber.visibility = visibility
-        buttonWriteNfc.visibility = visibility
-        buttonReadNfc.visibility = visibility
-        buttonCheckInNfc.visibility = visibility
-        buttonCheckOutNfc.visibility = visibility
-        buttonResetGame.visibility = visibility
-        buttonClearScans.visibility = visibility
+        val actionVisibility = if (areConnectionsActive) View.VISIBLE else View.GONE
+        // Primary actions
+        buttonReadNfc.visibility = actionVisibility
+        buttonCheckInNfc.visibility = actionVisibility
+        buttonCheckOutNfc.visibility = actionVisibility
+        // Write section
+        findViewById<View>(R.id.editTextNumberLayout).visibility = actionVisibility
+        buttonWriteNfc.visibility = actionVisibility
+        // Admin section
+        buttonResetGame.visibility = actionVisibility
+        buttonClearScans.visibility = actionVisibility
+        // Connection card is always visible in NORMAL state
+        connectionCard.visibility = View.VISIBLE
     }
 
     private fun updateUiForState(newState: AppUiState) {
         if (newState != AppUiState.SCANNING) stopScanningBarAnimation()
         if (newState != AppUiState.SUCCESS_DISPLAY) textViewSuccessNumber.visibility = View.GONE
 
-        webSocketStatusIndicator.visibility = if (newState == AppUiState.NORMAL) View.VISIBLE else View.GONE
         mainContentLayout.visibility = View.GONE
         scanningBar.visibility = View.GONE
 
