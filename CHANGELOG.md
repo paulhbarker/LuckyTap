@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.2](https://github.com/paulhbarker/LuckyTap/compare/v1.0.1...v1.0.2) (2026-05-08)
+
+
+### Bug Fixes
+
+* wire WiFi/WS defaults from CI secrets into BuildConfig ([5bda39a](https://github.com/paulhbarker/LuckyTap/commit/5bda39ab75807129ba0bdf8425803c56edd8eb89))
+
 ## [1.0.1](https://github.com/paulhbarker/LuckyTap/compare/v1.0.0...v1.0.1) (2026-05-08)
 
 
