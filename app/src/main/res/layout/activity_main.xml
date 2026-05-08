@@ -209,9 +209,7 @@
                 app:boxCornerRadiusTopStart="12dp"
                 app:boxCornerRadiusTopEnd="12dp"
                 app:boxCornerRadiusBottomStart="12dp"
-                app:boxCornerRadiusBottomEnd="12dp"
-                app:boxStrokeColor="@color/outline_dark"
-                app:hintTextColor="@color/on_surface_dim_dark">
+                app:boxCornerRadiusBottomEnd="12dp">
 
                 <com.google.android.material.textfield.TextInputEditText
                     android:id="@+id/editTextNumber"
