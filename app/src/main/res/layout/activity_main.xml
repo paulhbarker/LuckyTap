@@ -297,7 +297,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="@string/button_settings"
-                app:icon="@android:drawable/ic_menu_preferences"
+                app:icon="@drawable/ic_settings"
                 app:iconGravity="textStart" />
 
         </LinearLayout>

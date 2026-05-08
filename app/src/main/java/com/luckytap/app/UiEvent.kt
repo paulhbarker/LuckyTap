@@ -1,4 +1,4 @@
-package com.example.nfcapp
+package com.luckytap.app
 
 /**
  * One-shot events emitted by the ViewModel for the Activity to consume.

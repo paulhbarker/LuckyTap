@@ -1,4 +1,4 @@
-package com.example.nfcapp
+package com.luckytap.app
 
 import android.os.Bundle
 import android.widget.EditText

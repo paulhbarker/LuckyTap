@@ -1,4 +1,4 @@
-package com.example.nfcapp
+package com.luckytap.app
 
 import android.Manifest
 import android.content.BroadcastReceiver
@@ -151,8 +151,9 @@ class WifiController(private val context: Context) {
 
             override fun onLost(network: Network) {
                 super.onLost(network)
-                Log.w(TAG, "NetworkCallback: LOST for $ssid.")
+                Log.w(TAG, "NetworkCallback: LOST for $ssid. Scheduling reconnect.")
                 _connectionStatus.postValue(WifiConnectionState.DISCONNECTED)
+                scheduleRetry()
             }
         }
 

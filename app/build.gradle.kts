@@ -15,11 +15,11 @@ fun localProp(key: String, fallback: String): String =
     localProperties.getProperty(key, fallback)
 
 android {
-    namespace = "com.example.nfcapp"
+    namespace = "com.luckytap.app"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.example.nfcapp"
+        applicationId = "com.luckytap.app"
         minSdk = 23
         targetSdk = 35
         versionCode = 1
@@ -28,10 +28,10 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // Inject WiFi / WebSocket defaults from local.properties into BuildConfig
-        buildConfigField("String", "DEFAULT_WIFI_SSID", "\"${localProp("nfcapp.wifi.ssid", "")}\"")
-        buildConfigField("String", "DEFAULT_WIFI_PASSWORD", "\"${localProp("nfcapp.wifi.password", "")}\"")
-        buildConfigField("String", "DEFAULT_WS_IP", "\"${localProp("nfcapp.ws.ip", "10.0.0.1")}\"")
-        buildConfigField("String", "DEFAULT_WS_PORT", "\"${localProp("nfcapp.ws.port", "8080")}\"")
+        buildConfigField("String", "DEFAULT_WIFI_SSID", "\"${localProp("luckytap.wifi.ssid", "")}\"")
+        buildConfigField("String", "DEFAULT_WIFI_PASSWORD", "\"${localProp("luckytap.wifi.password", "")}\"")
+        buildConfigField("String", "DEFAULT_WS_IP", "\"${localProp("luckytap.ws.ip", "10.0.0.1")}\"")
+        buildConfigField("String", "DEFAULT_WS_PORT", "\"${localProp("luckytap.ws.port", "8080")}\"")
     }
 
     buildFeatures {

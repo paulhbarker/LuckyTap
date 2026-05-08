@@ -1,4 +1,4 @@
-package com.example.nfcapp
+package com.luckytap.app
 
 import org.junit.Test
 
