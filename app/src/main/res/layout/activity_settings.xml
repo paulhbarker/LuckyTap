@@ -12,7 +12,8 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:paddingHorizontal="20dp"
+        android:paddingLeft="20dp"
+        android:paddingRight="20dp"
         android:paddingTop="48dp"
         android:paddingBottom="20dp">
 
@@ -52,6 +53,7 @@
                 android:layout_height="wrap_content"
                 android:inputType="text"
                 android:autofillHints="username"
+                tools:targetApi="o"
                 android:textColor="@color/on_surface_dark" />
         </com.google.android.material.textfield.TextInputLayout>
 
@@ -74,6 +76,7 @@
                 android:layout_height="wrap_content"
                 android:inputType="textPassword"
                 android:autofillHints="password"
+                tools:targetApi="o"
                 android:textColor="@color/on_surface_dark" />
         </com.google.android.material.textfield.TextInputLayout>
 
@@ -103,6 +106,7 @@
                 android:layout_height="wrap_content"
                 android:inputType="text"
                 android:importantForAutofill="no"
+                tools:targetApi="o"
                 android:textColor="@color/on_surface_dark" />
         </com.google.android.material.textfield.TextInputLayout>
 
@@ -124,6 +128,7 @@
                 android:layout_height="wrap_content"
                 android:inputType="number"
                 android:importantForAutofill="no"
+                tools:targetApi="o"
                 android:textColor="@color/on_surface_dark" />
         </com.google.android.material.textfield.TextInputLayout>
 

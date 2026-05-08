@@ -38,7 +38,13 @@ class AppPreferences private constructor(context: Context) {
     private val sharedPreferences: SharedPreferences =
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
-    private val encryptedSharedPreferences: SharedPreferences = createEncryptedPrefs(context)
+    /**
+     * WiFi password is stored in EncryptedSharedPreferences backed by the Android Keystore
+     * (AES-256-GCM). This requires API 23+ — which matches our minSdk. If the Keystore
+     * state is ever corrupted (e.g. after a factory-reset-without-wipe scenario),
+     * [createEncryptedPrefs] recovers by wiping and rebuilding the key material.
+     */
+    private val securePreferences: SharedPreferences = createEncryptedPrefs(context)
 
     private fun createEncryptedPrefs(context: Context): SharedPreferences {
         return try {
@@ -96,8 +102,8 @@ class AppPreferences private constructor(context: Context) {
         set(value) = sharedPreferences.edit { putString(KEY_WIFI_SSID_OVERRIDE, value) }
 
     var wifiPasswordOverride: String?
-        get() = encryptedSharedPreferences.getString(KEY_WIFI_PASSWORD_OVERRIDE, null)
-        set(value) = encryptedSharedPreferences.edit { putString(KEY_WIFI_PASSWORD_OVERRIDE, value) }
+        get() = securePreferences.getString(KEY_WIFI_PASSWORD_OVERRIDE, null)
+        set(value) = securePreferences.edit { putString(KEY_WIFI_PASSWORD_OVERRIDE, value) }
 
     fun getEffectiveWifiSsid(): String = wifiSsidOverride ?: DEFAULT_WIFI_SSID
     fun getEffectiveWifiPassword(): String = wifiPasswordOverride ?: DEFAULT_WIFI_PASSWORD

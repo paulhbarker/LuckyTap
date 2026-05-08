@@ -10,6 +10,7 @@ import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.net.wifi.WifiConfiguration
+import android.net.wifi.WifiInfo
 import android.net.wifi.WifiManager
 import android.net.wifi.WifiNetworkSpecifier
 import android.os.Build
@@ -18,6 +19,9 @@ import android.os.Looper
 import android.util.Log
 import androidx.annotation.RequiresApi
 import androidx.annotation.RequiresPermission
+import androidx.core.content.ContextCompat
+import androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED
+import androidx.core.content.IntentCompat
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 
@@ -58,13 +62,15 @@ class WifiController(private val context: Context) {
     }
 
     // Legacy receiver for pre-Q only
-    @Suppress("DEPRECATION")
     private val wifiStateReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             if (WifiManager.NETWORK_STATE_CHANGED_ACTION != intent.action) return
 
-            val networkInfo =
-                intent.getParcelableExtra<android.net.NetworkInfo>(WifiManager.EXTRA_NETWORK_INFO)
+            @Suppress("DEPRECATION")
+            val networkInfo = IntentCompat.getParcelableExtra(
+                intent, WifiManager.EXTRA_NETWORK_INFO, android.net.NetworkInfo::class.java
+            )
+            @Suppress("DEPRECATION")
             val currentSsid = wifiManager.connectionInfo?.ssid?.replace("\"", "")
 
             if ((networkInfo?.isConnected == true) &&
@@ -162,9 +168,11 @@ class WifiController(private val context: Context) {
         wifiConfig.preSharedKey = "\"$psk\""
 
         if (!isReceiverRegistered) {
-            context.registerReceiver(
+            ContextCompat.registerReceiver(
+                context,
                 wifiStateReceiver,
                 IntentFilter(WifiManager.NETWORK_STATE_CHANGED_ACTION),
+                RECEIVER_NOT_EXPORTED,
             )
             isReceiverRegistered = true
         }
@@ -223,20 +231,34 @@ class WifiController(private val context: Context) {
         addedNetworkId = -1
     }
 
-    @Suppress("DEPRECATION")
     fun isCurrentlyConnectedToTarget(targetSsidToCheck: String?): Boolean {
         if (targetSsidToCheck == null || !wifiManager.isWifiEnabled) return false
 
-        val connectionInfo = wifiManager.connectionInfo
-        val currentConnectedSsid = connectionInfo?.ssid?.replace("\"", "")
-        val isConnected = connectionInfo?.networkId != -1 && currentConnectedSsid == targetSsidToCheck
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            return isConnected &&
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            // API 31+: WifiManager.getConnectionInfo() is deprecated. Derive SSID from the
+            // active network's transport info via ConnectivityManager — no extra permissions needed.
+            val activeNetwork = connectivityManager.activeNetwork ?: return false
+            val caps = connectivityManager.getNetworkCapabilities(activeNetwork) ?: return false
+            if (!caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) return false
+            val wifiInfo = caps.transportInfo as? WifiInfo ?: return false
+            val currentSsid = wifiInfo.ssid?.replace("\"", "")
+            currentSsid == targetSsidToCheck &&
                     _connectionStatus.value == WifiConnectionState.CONNECTED &&
                     currentTargetSsid == targetSsidToCheck
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            // API 29–30: getConnectionInfo() still works but double-check via our tracked state
+            @Suppress("DEPRECATION")
+            val currentSsid = wifiManager.connectionInfo?.ssid?.replace("\"", "")
+            currentSsid == targetSsidToCheck &&
+                    _connectionStatus.value == WifiConnectionState.CONNECTED &&
+                    currentTargetSsid == targetSsidToCheck
+        } else {
+            // API 21–28: legacy path
+            @Suppress("DEPRECATION")
+            val connectionInfo = wifiManager.connectionInfo
+            val currentSsid = connectionInfo?.ssid?.replace("\"", "")
+            connectionInfo?.networkId != -1 && currentSsid == targetSsidToCheck
         }
-        return isConnected
     }
 
     private fun cancelTimeout() {

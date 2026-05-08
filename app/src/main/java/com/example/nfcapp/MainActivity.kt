@@ -42,6 +42,8 @@ import androidx.activity.viewModels
 import androidx.annotation.RequiresPermission
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED
+import androidx.core.content.IntentCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
@@ -166,11 +168,13 @@ class MainActivity : AppCompatActivity() {
     // --- WiFi State Receiver ---
     private var isReceiverRegistered = false
     private val wifiStateReceiver = object : BroadcastReceiver() {
-        @Suppress("DEPRECATION")
         override fun onReceive(context: Context, intent: Intent) {
             when (intent.action) {
                 WifiManager.NETWORK_STATE_CHANGED_ACTION -> {
-                    val networkInfo = intent.getParcelableExtra<android.net.NetworkInfo>(WifiManager.EXTRA_NETWORK_INFO)
+                    @Suppress("DEPRECATION")
+                    val networkInfo = IntentCompat.getParcelableExtra(
+                        intent, WifiManager.EXTRA_NETWORK_INFO, android.net.NetworkInfo::class.java
+                    )
                     if (networkInfo?.isConnected == true) {
                         val isTarget = wifiController.isCurrentlyConnectedToTarget(appPreferences.getEffectiveWifiSsid())
                         viewModel.setWifiConnected(connected = isTarget)
@@ -225,7 +229,9 @@ class MainActivity : AppCompatActivity() {
                 addAction(WifiManager.NETWORK_STATE_CHANGED_ACTION)
                 addAction(WifiManager.WIFI_STATE_CHANGED_ACTION)
             }
-            registerReceiver(wifiStateReceiver, intentFilter)
+            ContextCompat.registerReceiver(
+                this, wifiStateReceiver, intentFilter, RECEIVER_NOT_EXPORTED
+            )
             isReceiverRegistered = true
         }
     }
@@ -341,6 +347,12 @@ class MainActivity : AppCompatActivity() {
             Manifest.permission.ACCESS_NETWORK_STATE,
             Manifest.permission.INTERNET,
         )
+
+        // API 33+: NEARBY_WIFI_DEVICES replaces the location requirement for Wi-Fi scanning.
+        // Both are requested together so the user grants what the OS enforces on their version.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            requiredPermissions.add(Manifest.permission.NEARBY_WIFI_DEVICES)
+        }
 
         val permissionsToRequest = requiredPermissions.filter {
             ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
@@ -643,7 +655,11 @@ class MainActivity : AppCompatActivity() {
     private fun promptEnableWifi() {
         Toast.makeText(this, R.string.toast_enable_wifi, Toast.LENGTH_LONG).show()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            // API 29+: show the system Wi-Fi panel
             wifiEnableLauncher.launch(Intent(Settings.Panel.ACTION_WIFI))
+        } else {
+            // API 21–28: open the Wi-Fi settings screen directly
+            wifiEnableLauncher.launch(Intent(Settings.ACTION_WIFI_SETTINGS))
         }
     }
 
@@ -667,11 +683,16 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun arePermissionsGranted(): Boolean {
-        return listOf(
+        val permissions = mutableListOf(
             Manifest.permission.ACCESS_FINE_LOCATION,
             Manifest.permission.ACCESS_WIFI_STATE,
             Manifest.permission.CHANGE_WIFI_STATE,
-        ).all {
+        )
+        // On API 33+, NEARBY_WIFI_DEVICES is also required for Wi-Fi operations.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            permissions.add(Manifest.permission.NEARBY_WIFI_DEVICES)
+        }
+        return permissions.all {
             ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
         }
     }
