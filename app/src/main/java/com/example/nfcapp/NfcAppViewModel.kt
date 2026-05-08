@@ -2,260 +2,311 @@ package com.example.nfcapp
 
 import android.app.Application
 import android.util.Log
-import android.widget.Toast
 import androidx.lifecycle.AndroidViewModel
-import androidx.lifecycle.LiveData
-import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import okhttp3.*
 import org.json.JSONObject
 
-// --- Enums (can be top-level or nested if preferred) ---
+// --- Enums ---
 enum class NfcOperationMode { NONE, WRITE, READ, CHECK_IN, CHECK_OUT }
 enum class AppUiState { NORMAL, SCANNING, SUCCESS_DISPLAY }
 enum class WebSocketConnectionState { DISCONNECTED, CONNECTING, CONNECTED, CLOSING }
 
-// --- Data classes for events/results (optional but good for structured data) ---
+// --- Data classes ---
 data class NfcScanResult(val success: Boolean, val data: String? = null, val error: String? = null)
-data class WebSocketUpdate(val message: String, val isError: Boolean = false)
 
 class NfcAppViewModel(application: Application) : AndroidViewModel(application) {
 
-    // --- NFC Related State ---
-    private val _currentNfcMode = MutableLiveData<NfcOperationMode>(NfcOperationMode.NONE)
-    val currentNfcMode: LiveData<NfcOperationMode> = _currentNfcMode
-
-    private val _nfcStatusMessage = MutableLiveData<String?>()
-    val nfcStatusMessage: LiveData<String?> = _nfcStatusMessage // For general NFC status updates
-
-    // --- UI State ---
-    private val _uiState = MutableLiveData<AppUiState>(AppUiState.NORMAL)
-    val uiState: LiveData<AppUiState> = _uiState
-
-    private val _numberForSuccessDisplay = MutableLiveData<String?>()
-    val numberForSuccessDisplay: LiveData<String?> = _numberForSuccessDisplay
-
-    private val _isWriteButtonEnabled = MutableLiveData<Boolean>(false)
-    val isWriteButtonEnabled: LiveData<Boolean> = _isWriteButtonEnabled
-
-    private val _webSocketConnectionState = MutableLiveData<WebSocketConnectionState>(WebSocketConnectionState.DISCONNECTED)
-    val webSocketConnectionState: LiveData<WebSocketConnectionState> = _webSocketConnectionState
-
-    // --- WebSocket Related State & Logic ---
-    private var webSocket: WebSocket? = null
-    private val webSocketUrl = "ws://192.168.50.2:8080/ws" // Centralized
-    private val okHttpClient = OkHttpClient() // Could be injected via Hilt/Koin later
-
-    private val _webSocketStatus = MutableLiveData<WebSocketUpdate>()
-    val webSocketStatus: LiveData<WebSocketUpdate> = _webSocketStatus
-
-    // --- Constants ---
-    private val SUCCESS_DISPLAY_DURATION_MS = 1000L
-
-    init {
-        connectWebSocket()
+    companion object {
+        private const val TAG = "NfcAppViewModel"
+        private const val SUCCESS_DISPLAY_DURATION_MS = 1000L
     }
 
+    private val appPreferences = AppPreferences.getInstance(application)
 
+    /** Convenience accessor for string resources. */
+    private fun str(resId: Int): String = getApplication<Application>().getString(resId)
+    private fun str(resId: Int, vararg args: Any): String = getApplication<Application>().getString(resId, *args)
 
-    // --- UI Event Handlers (called by Activity/Fragment) ---
+    // --- One-shot UI events ---
+    private val _uiEvents = MutableSharedFlow<UiEvent>(extraBufferCapacity = 8)
+    val uiEvents: SharedFlow<UiEvent> = _uiEvents.asSharedFlow()
 
+    // --- WebSocket (delegated to WebSocketManager) ---
+    private val webSocketManager = WebSocketManager(
+        scope = viewModelScope,
+        getWebSocketUrl = { appPreferences.getEffectiveWebSocketUrl() },
+    )
+    val webSocketConnectionState: StateFlow<WebSocketConnectionState> = webSocketManager.connectionState
+
+    // --- NFC state ---
+    private val _currentNfcMode = MutableStateFlow(NfcOperationMode.NONE)
+    val currentNfcMode: StateFlow<NfcOperationMode> = _currentNfcMode.asStateFlow()
+
+    private val _nfcStatusMessage = MutableStateFlow<String?>(null)
+    val nfcStatusMessage: StateFlow<String?> = _nfcStatusMessage.asStateFlow()
+
+    // --- UI state ---
+    private val _uiState = MutableStateFlow(AppUiState.NORMAL)
+    val uiState: StateFlow<AppUiState> = _uiState.asStateFlow()
+
+    private val _numberForSuccessDisplay = MutableStateFlow<String?>(null)
+    val numberForSuccessDisplay: StateFlow<String?> = _numberForSuccessDisplay.asStateFlow()
+
+    private val _isWriteButtonEnabled = MutableStateFlow(false)
+    val isWriteButtonEnabled: StateFlow<Boolean> = _isWriteButtonEnabled.asStateFlow()
+
+    // --- WiFi connection state ---
+    private val _isWifiConnectedToTarget = MutableStateFlow(false)
+    val isWifiConnectedToTarget: StateFlow<Boolean> = _isWifiConnectedToTarget.asStateFlow()
+
+    fun setWifiConnected(connected: Boolean) {
+        _isWifiConnectedToTarget.value = connected
+    }
+
+    // --- Combined connection status ---
+    val areEssentialConnectionsActive: StateFlow<Boolean> = combine(
+        _isWifiConnectedToTarget,
+        webSocketConnectionState,
+    ) { wifiConnected, wsState ->
+        wifiConnected && wsState == WebSocketConnectionState.CONNECTED
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    /** Pre-computed connection status text for the Activity to display directly. */
+    val connectionStatusText: StateFlow<String> = combine(
+        areEssentialConnectionsActive,
+        _isWifiConnectedToTarget,
+        webSocketConnectionState,
+        _nfcStatusMessage,
+        _uiState,
+    ) { isActive, wifiOk, wsState, nfcMsg, uiState ->
+        if (isActive) {
+            if (uiState == AppUiState.NORMAL) nfcMsg ?: str(R.string.status_idle) else ""
+        } else {
+            val parts = mutableListOf<String>()
+            if (!wifiOk) parts += str(R.string.connection_wifi_not_connected, currentTargetWifiSsid)
+            if (wsState != WebSocketConnectionState.CONNECTED) {
+                parts += str(R.string.connection_ws_state, wsState.name.lowercase())
+            }
+            str(R.string.connection_status_prefix, parts.joinToString(". "))
+        }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, str(R.string.status_idle))
+
+    private var _currentTargetWifiSsid: String = appPreferences.getEffectiveWifiSsid()
+    val currentTargetWifiSsid: String get() = _currentTargetWifiSsid
+
+    init {
+        loadAndApplyPreferences()
+
+        // When WiFi connects, trigger WebSocket connection
+        viewModelScope.launch {
+            _isWifiConnectedToTarget.collect { wifiConnected ->
+                if (wifiConnected && webSocketConnectionState.value != WebSocketConnectionState.CONNECTED) {
+                    Log.d(TAG, "WiFi connected. Attempting WebSocket connection.")
+                    webSocketManager.connect(appPreferences.getEffectiveWebSocketUrl())
+                }
+            }
+        }
+
+        // Forward WebSocket manager events
+        viewModelScope.launch {
+            webSocketManager.events.collect { event -> _uiEvents.emit(event) }
+        }
+
+        // Handle connection loss
+        viewModelScope.launch {
+            areEssentialConnectionsActive.collect { active ->
+                if (!active) handleConnectionLoss()
+            }
+        }
+    }
+
+    private fun loadAndApplyPreferences() {
+        _currentTargetWifiSsid = appPreferences.getEffectiveWifiSsid()
+        // Only connect WebSocket if WiFi is already connected;
+        // otherwise the WiFi-connected collector will trigger it.
+        if (_isWifiConnectedToTarget.value) {
+            val newWsUrl = appPreferences.getEffectiveWebSocketUrl()
+            webSocketManager.connect(newWsUrl)
+        }
+    }
+
+    fun getEffectiveWifiSsidForActivity(): String = appPreferences.getEffectiveWifiSsid()
+    fun getEffectiveWifiPasswordForActivity(): String = appPreferences.getEffectiveWifiPassword()
+
+    /** Called from SettingsActivity after saving; reloads prefs and reconnects if needed. */
+    fun onPreferencesChanged() {
+        loadAndApplyPreferences()
+    }
+
+    // --- UI Event Handlers ---
     fun onWriteButtonModeSelected(numberToWrite: String, currentInputIsValid: Boolean) {
-        if (!currentInputIsValid) { // Double check, though UI should enforce
-            _nfcStatusMessage.value = "Invalid number for writing."
+        if (!currentInputIsValid) {
+            _nfcStatusMessage.value = str(R.string.status_invalid_number)
             return
         }
         _currentNfcMode.value = NfcOperationMode.WRITE
-        _nfcStatusMessage.value = "Ready to WRITE '$numberToWrite'. Tap NFC Card."
-        // UI state (NORMAL or SCANNING) is mostly managed by the read-like operations
-        // For write, we stay in NORMAL until a tag is tapped.
+        _nfcStatusMessage.value = str(R.string.status_ready_write, numberToWrite)
     }
 
     fun onReadButtonModeSelected() {
         _currentNfcMode.value = NfcOperationMode.READ
         _uiState.value = AppUiState.SCANNING
+        _nfcStatusMessage.value = str(R.string.status_scanning_read)
     }
 
     fun onCheckInButtonModeSelected() {
         _currentNfcMode.value = NfcOperationMode.CHECK_IN
         _uiState.value = AppUiState.SCANNING
+        _nfcStatusMessage.value = str(R.string.status_scanning_check_in)
     }
 
     fun onCheckOutButtonModeSelected() {
         _currentNfcMode.value = NfcOperationMode.CHECK_OUT
         _uiState.value = AppUiState.SCANNING
+        _nfcStatusMessage.value = str(R.string.status_scanning_check_out)
     }
 
     fun validateInputForWrite(text: String) {
-        var isValid = false
-        if (text.isNotBlank()) {
-            try {
-                val number = text.toInt()
-                if (number in 1..100) {
-                    isValid = true
-                }
-            } catch (e: NumberFormatException) { /* isValid remains false */ }
-        }
+        val isValid = (text.toIntOrNull()?.let { it in 1..100 }) ?: false
         _isWriteButtonEnabled.value = isValid
     }
 
     fun onNfcTagScannedForWrite(tagData: String, success: Boolean, errorMessage: String? = null) {
-        if (success) {
-            Toast.makeText(getApplication(), "Wrote '$tagData' to NFC tag!", Toast.LENGTH_SHORT).show()
-        } else {
-            Toast.makeText(getApplication(), "Write Error: $errorMessage", Toast.LENGTH_SHORT).show()
+        viewModelScope.launch {
+            if (success) {
+                _nfcStatusMessage.value = str(R.string.status_write_success, tagData)
+                _uiEvents.emit(UiEvent.ShowToast(str(R.string.toast_wrote_tag, tagData)))
+            } else {
+                val err = errorMessage ?: "Unknown error"
+                _nfcStatusMessage.value = str(R.string.status_write_error, err)
+                _uiEvents.emit(UiEvent.ShowToast(str(R.string.toast_write_error, err)))
+            }
+            _currentNfcMode.value = NfcOperationMode.NONE
+            _uiState.value = AppUiState.NORMAL
         }
-        _currentNfcMode.value = NfcOperationMode.NONE // Reset mode
-        _uiState.value = AppUiState.NORMAL          // Revert to normal UI
     }
 
     fun onNfcTagScannedForRead(result: NfcScanResult) {
-        if (result.success && result.data != null) {
-            _numberForSuccessDisplay.value = result.data
-            _uiState.value = AppUiState.SUCCESS_DISPLAY
-
-            val messageType = when (_currentNfcMode.value) {
-                NfcOperationMode.CHECK_IN -> "nfc-check-in"
-                NfcOperationMode.CHECK_OUT -> "nfc-check-out"
-                NfcOperationMode.READ -> "card-scanned"
-                else -> ""
-            }
-            if (messageType.isNotBlank()) {
-                val cardPayload = JSONObject().apply { put("number", result.data.toIntOrNull()) }
-                sendToWebSocket(messageType, cardPayload)
-            }
-
+        if (!result.success || result.data == null) {
+            val errorMsg = result.error ?: str(R.string.status_no_ndef)
+            _nfcStatusMessage.value = str(R.string.status_read_error, errorMsg)
+            _currentNfcMode.value = NfcOperationMode.NONE
+            _uiState.value = AppUiState.NORMAL
             viewModelScope.launch {
-                delay(SUCCESS_DISPLAY_DURATION_MS)
-                _numberForSuccessDisplay.value = null // Clear it
-                if (_currentNfcMode.value != NfcOperationMode.NONE && _currentNfcMode.value != NfcOperationMode.WRITE) {
-                    _uiState.value = AppUiState.SCANNING // Return to scanning
-                } else {
-                    _uiState.value = AppUiState.NORMAL // Should not happen if scan initiated a read mode
-                    _currentNfcMode.value = NfcOperationMode.NONE
-                }
+                _uiEvents.emit(UiEvent.ShowToast(str(R.string.toast_read_error, errorMsg), longDuration = true))
             }
+            return
+        }
+
+        _numberForSuccessDisplay.value = result.data
+
+        val messageType = when (_currentNfcMode.value) {
+            NfcOperationMode.CHECK_IN -> "nfc-check-in"
+            NfcOperationMode.CHECK_OUT -> "nfc-check-out"
+            NfcOperationMode.READ -> "card-scanned"
+            else -> ""
+        }
+
+        val socketResult = if (messageType.isNotBlank()) {
+            val payload = JSONObject().apply { put("number", result.data.toIntOrNull()) }
+            webSocketManager.send(messageType, payload)
         } else {
-            _nfcStatusMessage.value = "Read Error: ${result.error ?: "No NDEF messages or parse error."}"
-            _currentNfcMode.value = NfcOperationMode.NONE // Reset mode on read failure
-            _uiState.value = AppUiState.NORMAL          // Revert to normal UI
+            false
+        }
+
+        if (!socketResult) {
+            viewModelScope.launch {
+                _uiEvents.emit(UiEvent.ShowToast(str(R.string.toast_read_error_short), longDuration = true))
+            }
+            _nfcStatusMessage.value = str(R.string.status_read_error, result.error ?: str(R.string.status_no_ndef))
+            _uiState.value = AppUiState.NORMAL
+            _currentNfcMode.value = NfcOperationMode.NONE
+            return
+        }
+
+        _uiState.value = AppUiState.SUCCESS_DISPLAY
+        viewModelScope.launch {
+            delay(SUCCESS_DISPLAY_DURATION_MS)
+            _numberForSuccessDisplay.value = null
+            if (areEssentialConnectionsActive.value &&
+                _currentNfcMode.value != NfcOperationMode.NONE &&
+                _currentNfcMode.value != NfcOperationMode.WRITE
+            ) {
+                _uiState.value = AppUiState.SCANNING
+            } else {
+                _uiState.value = AppUiState.NORMAL
+                _currentNfcMode.value = NfcOperationMode.NONE
+            }
         }
     }
 
     fun onResetGameButtonPressed() {
-        sendToWebSocket("admin-reset-game", "")
+        if (areEssentialConnectionsActive.value) {
+            webSocketManager.send("admin-reset-game", JSONObject())
+            _nfcStatusMessage.value = str(R.string.status_reset_sent)
+        } else {
+            _nfcStatusMessage.value = str(R.string.status_reset_no_connection)
+            viewModelScope.launch { _uiEvents.emit(UiEvent.ShowToast(str(R.string.toast_no_connection))) }
+        }
     }
 
     fun onClearScansButtonPressed() {
-        sendToWebSocket("admin-clear-scans", "")
+        if (areEssentialConnectionsActive.value) {
+            webSocketManager.send("admin-clear-scans", JSONObject())
+            _nfcStatusMessage.value = str(R.string.status_clear_sent)
+        } else {
+            _nfcStatusMessage.value = str(R.string.status_clear_no_connection)
+            viewModelScope.launch { _uiEvents.emit(UiEvent.ShowToast(str(R.string.toast_no_connection))) }
+        }
     }
 
     fun onNfcTagScanFailed(reason: String) {
         _nfcStatusMessage.value = reason
-        _currentNfcMode.value = NfcOperationMode.NONE
-        _uiState.value = AppUiState.NORMAL
+        if (_uiState.value != AppUiState.SCANNING) {
+            _currentNfcMode.value = NfcOperationMode.NONE
+            _uiState.value = AppUiState.NORMAL
+        } else {
+            viewModelScope.launch { _uiEvents.emit(UiEvent.ShowToast(reason)) }
+        }
     }
-
 
     fun onBackButtonPressed() {
         if (_uiState.value == AppUiState.SCANNING || _uiState.value == AppUiState.SUCCESS_DISPLAY) {
             _currentNfcMode.value = NfcOperationMode.NONE
             _uiState.value = AppUiState.NORMAL
-        } else {
-            // Signal activity to perform super.onBackPressed() - could use a SingleLiveEvent for this
-            // For now, the activity will handle the "else" case of its own onBackPressed
+            _nfcStatusMessage.value = str(R.string.status_scan_cancelled)
         }
     }
 
-    fun resetToIdle() { // Called when user manually exits scanning mode (e.g. clicks Write btn)
+    fun resetToIdle() {
         _currentNfcMode.value = NfcOperationMode.NONE
         _uiState.value = AppUiState.NORMAL
+        _nfcStatusMessage.value = str(R.string.status_idle)
     }
 
-
-    // --- WebSocket Logic ---
-    private fun connectWebSocket() {
-        if (webSocket != null || _webSocketConnectionState.value == WebSocketConnectionState.CONNECTING) {
-            Log.d("ViewModelWebSocket", "Already connected or connecting.")
-            return
-        }
-
-        _webSocketConnectionState.postValue(WebSocketConnectionState.CONNECTING) // Set state before connecting
-        _webSocketStatus.postValue(WebSocketUpdate("WebSocket: Connecting..."))
-
-        val request = Request.Builder().url(webSocketUrl).build()
-        webSocket = okHttpClient.newWebSocket(request, object : WebSocketListener() {
-            override fun onOpen(webSocket: WebSocket, response: Response) {
-                Log.d("ViewModelWebSocket", "Connected!")
-                _webSocketConnectionState.postValue(WebSocketConnectionState.CONNECTED)
-                _webSocketStatus.postValue(WebSocketUpdate("WebSocket: Connected"))
-            }
-
-            override fun onMessage(webSocket: WebSocket, text: String) {
-                Log.d("ViewModelWebSocket", "Message received: $text")
-                _webSocketStatus.postValue(WebSocketUpdate("WebSocket Rx: $text"))
-            }
-
-            override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
-                Log.d("ViewModelWebSocket", "Closing: $code / $reason")
-                _webSocketConnectionState.postValue(WebSocketConnectionState.CLOSING) // Or DISCONNECTED
-                _webSocketStatus.postValue(WebSocketUpdate("WebSocket: Closing"))
-                this@NfcAppViewModel.webSocket = null
-            }
-
-            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                Log.e("ViewModelWebSocket", "Error: ${t.message}", t)
-                _webSocketConnectionState.postValue(WebSocketConnectionState.DISCONNECTED)
-                _webSocketStatus.postValue(WebSocketUpdate("WebSocket: Error - ${t.message}", true))
-                this@NfcAppViewModel.webSocket = null
-                // Simple retry
-                viewModelScope.launch {
-                    delay(5000)
-                    if (_webSocketConnectionState.value == WebSocketConnectionState.DISCONNECTED) { // Only retry if still disconnected
-                        connectWebSocket()
-                    }
-                }
-            }
-        })
-    }
-
-    private fun sendToWebSocket(type: String, payload: Any) {
-        if (webSocket == null) {
-            _webSocketStatus.value = WebSocketUpdate("WS: Not connected. Attempting to send.", true)
-            // If not already connecting or connected, attempt to connect.
-            // connectWebSocket() already sets state to CONNECTING.
-            if (_webSocketConnectionState.value != WebSocketConnectionState.CONNECTING &&
-                _webSocketConnectionState.value != WebSocketConnectionState.CONNECTED) {
-                connectWebSocket()
-            }
-            return // Don't send if not connected
-        }
-
-        try {
-            val jsonObject = JSONObject().apply {
-                put("type", type)
-                put("payload", payload)
-            }
-            val jsonMessage = jsonObject.toString()
-            val success = webSocket?.send(jsonMessage)
-            if (success == true) {
-                Log.d("ViewModelWebSocket", "Sent: $jsonMessage")
-                _webSocketStatus.value = WebSocketUpdate("WS: Sent '$jsonMessage'")
-            } else {
-                Log.w("ViewModelWebSocket", "Failed to send, queue full or socket closed.")
-                _webSocketStatus.value = WebSocketUpdate("WS: Failed to send '$jsonMessage'", true)
-            }
-        } catch (e: org.json.JSONException) {
-            Log.e("ViewModelWebSocket", "Error creating JSON", e)
-            _webSocketStatus.value = WebSocketUpdate("Error creating JSON for WS.", true)
+    private fun handleConnectionLoss() {
+        if (_uiState.value == AppUiState.SCANNING || _uiState.value == AppUiState.SUCCESS_DISPLAY) {
+            Log.d(TAG, "Connection lost during active state. Resetting to NORMAL.")
+            _currentNfcMode.value = NfcOperationMode.NONE
+            _uiState.value = AppUiState.NORMAL
+            _nfcStatusMessage.value = str(R.string.status_connection_lost)
         }
     }
 
-    override fun onCleared() { // Called when ViewModel is no longer used and will be destroyed
+    override fun onCleared() {
         super.onCleared()
-        webSocket?.close(1000, "ViewModel Cleared")
-        _webSocketConnectionState.postValue(WebSocketConnectionState.DISCONNECTED)
+        webSocketManager.shutdown()
+        Log.d(TAG, "NfcAppViewModel cleared.")
     }
 }

@@ -1,4 +1,3 @@
-// file: app/src/main/java/com/example/nfcapp/WifiController.kt
 package com.example.nfcapp
 
 import android.Manifest
@@ -14,188 +13,217 @@ import android.net.wifi.WifiConfiguration
 import android.net.wifi.WifiManager
 import android.net.wifi.WifiNetworkSpecifier
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
+import androidx.annotation.RequiresApi
 import androidx.annotation.RequiresPermission
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 
 class WifiController(private val context: Context) {
-    private val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
-    private val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
 
-    private val _connectionStatus = MutableLiveData<WifiConnectionState>(WifiConnectionState.DISCONNECTED)
+    companion object {
+        private const val TAG = "WifiController"
+        private const val CONNECTION_TIMEOUT_MS = 30_000L
+        private const val MAX_RETRIES = 3
+        private const val RETRY_DELAY_MS = 2_000L
+    }
+
+    private val wifiManager =
+        context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+    private val connectivityManager =
+        context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+
+    private val _connectionStatus = MutableLiveData(WifiConnectionState.DISCONNECTED)
     val connectionStatus: LiveData<WifiConnectionState> = _connectionStatus
 
     private var currentTargetSsid: String? = null
     private var currentNetworkCallback: ConnectivityManager.NetworkCallback? = null
-    private var addedNetworkId: Int = -1 // For pre-API 29 legacy connections
+    private var addedNetworkId: Int = -1
     private var isReceiverRegistered = false
 
+    // Handler and timeout management to avoid leaks
+    private val handler = Handler(Looper.getMainLooper())
+    private var timeoutRunnable: Runnable? = null
+
+    // Retry state
+    private var retryCount = 0
+    private var lastSsid: String? = null
+    private var lastPsk: String? = null
+    private var retryRunnable: Runnable? = null
 
     enum class WifiConnectionState {
         CONNECTED, CONNECTING, DISCONNECTED, ERROR
     }
 
+    // Legacy receiver for pre-Q only
+    @Suppress("DEPRECATION")
     private val wifiStateReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
-            if (WifiManager.NETWORK_STATE_CHANGED_ACTION == intent.action) {
-                val networkInfo = intent.getParcelableExtra<android.net.NetworkInfo>(WifiManager.EXTRA_NETWORK_INFO)
-                val currentSsidInBroadcast = wifiManager.connectionInfo?.ssid?.replace("\"", "")
+            if (WifiManager.NETWORK_STATE_CHANGED_ACTION != intent.action) return
 
-                if (networkInfo?.isConnected == true && networkInfo.typeName.equals("WIFI", ignoreCase = true)) {
-                    Log.d("WifiControllerLegacy", "Broadcast: Connected to $currentSsidInBroadcast, target was $currentTargetSsid")
-                    if (currentSsidInBroadcast == currentTargetSsid) {
-                        _connectionStatus.postValue(WifiConnectionState.CONNECTED)
-                    } else if (currentTargetSsid != null && _connectionStatus.value == WifiConnectionState.CONNECTING) {
-                        // Connected to a different WiFi while trying to connect to targetSsid
-                        Log.w("WifiControllerLegacy", "Connected to $currentSsidInBroadcast instead of $currentTargetSsid")
-                        // This could be an error or just a slow connection to the target
-                    }
-                } else if (networkInfo?.detailedState == android.net.NetworkInfo.DetailedState.DISCONNECTED) {
-                    Log.d("WifiControllerLegacy", "Broadcast: Disconnected from WiFi $currentSsidInBroadcast")
-                    // Only update if we were attempting to connect to this SSID or were connected.
-                    if (currentSsidInBroadcast == currentTargetSsid || currentTargetSsid != null) {
-                        // _connectionStatus.postValue(WifiConnectionState.DISCONNECTED) // Might be too aggressive
-                    }
+            val networkInfo =
+                intent.getParcelableExtra<android.net.NetworkInfo>(WifiManager.EXTRA_NETWORK_INFO)
+            val currentSsid = wifiManager.connectionInfo?.ssid?.replace("\"", "")
+
+            if ((networkInfo?.isConnected == true) &&
+                networkInfo.typeName.equals("WIFI", ignoreCase = true)
+            ) {
+                Log.d(TAG, "Legacy broadcast: Connected to $currentSsid, target=$currentTargetSsid")
+                if (currentSsid == currentTargetSsid) {
+                    _connectionStatus.postValue(WifiConnectionState.CONNECTED)
                 }
             }
         }
     }
 
-
     @RequiresPermission(Manifest.permission.ACCESS_FINE_LOCATION)
-    fun connectToWifi(ssid: String, psk: String) {
+    fun connectToWifi(context: Context, ssid: String, psk: String) {
         if (!wifiManager.isWifiEnabled) {
-            Log.w("WifiController", "WiFi is not enabled.")
+            Log.w(TAG, "WiFi is not enabled.")
             _connectionStatus.postValue(WifiConnectionState.ERROR)
             return
         }
 
-        Log.i("WifiController", "Attempting to connect to SSID: $ssid")
+        Log.i(TAG, "Attempting to connect to SSID: $ssid")
         _connectionStatus.postValue(WifiConnectionState.CONNECTING)
+        lastSsid = ssid
+        lastPsk = psk
+        disconnectFromWifi()
         currentTargetSsid = ssid
-        disconnectFromWifi() // Clean up previous connection attempts/callbacks before starting a new one
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val specifierBuilder = WifiNetworkSpecifier.Builder().setSsid(ssid)
-            if (psk.isNotEmpty()) { // WPA2/3 Enterprise might not use PSK
-                specifierBuilder.setWpa2Passphrase(psk)
+            connectApi29Plus(ssid, psk)
+        } else {
+            connectLegacy(context, ssid, psk)
+        }
+    }
+
+    @RequiresApi(Build.VERSION_CODES.Q)
+    private fun connectApi29Plus(ssid: String, psk: String) {
+        val specifierBuilder = WifiNetworkSpecifier.Builder().setSsid(ssid)
+        if (psk.isNotEmpty()) {
+            specifierBuilder.setWpa2Passphrase(psk)
+        }
+
+        val networkRequest = NetworkRequest.Builder()
+            .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
+            .removeCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            .setNetworkSpecifier(specifierBuilder.build())
+            .build()
+
+        cancelTimeout()
+        val runnable = Runnable {
+            Log.e(TAG, "Timed out waiting for network $ssid")
+            currentNetworkCallback?.let {
+                try {
+                    connectivityManager.unregisterNetworkCallback(it)
+                } catch (_: Exception) { }
             }
-            val specifier = specifierBuilder.build()
+            currentNetworkCallback = null
+            scheduleRetry()
+        }
+        timeoutRunnable = runnable
+        handler.postDelayed(runnable, CONNECTION_TIMEOUT_MS)
 
-            val networkRequest = NetworkRequest.Builder()
-                .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
-                .removeCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) // Try to connect even if no internet initially
-                .setNetworkSpecifier(specifier)
-                .build()
-
-            currentNetworkCallback = object : ConnectivityManager.NetworkCallback() {
-                override fun onAvailable(network: Network) {
-                    super.onAvailable(network)
-                    Log.i("WifiControllerQ", "NetworkCallback: AVAILABLE for $ssid. Binding process to network.")
-                    connectivityManager.bindProcessToNetwork(network)
-                    _connectionStatus.postValue(WifiConnectionState.CONNECTED)
-                }
-
-                override fun onLost(network: Network) {
-                    super.onLost(network)
-                    Log.w("WifiControllerQ", "NetworkCallback: LOST for $ssid")
-                    connectivityManager.bindProcessToNetwork(null) // Unbind
-                    if (currentTargetSsid == ssid) {
-                        _connectionStatus.postValue(WifiConnectionState.DISCONNECTED)
-                    }
-                }
-
-                override fun onUnavailable() {
-                    super.onUnavailable()
-                    Log.e("WifiControllerQ", "NetworkCallback: UNAVAILABLE for $ssid. Connection failed.")
-                    if (currentTargetSsid == ssid) {
-                        _connectionStatus.postValue(WifiConnectionState.ERROR)
-                    }
-                }
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                super.onAvailable(network)
+                Log.i(TAG, "NetworkCallback: AVAILABLE for $ssid. Binding process.")
+                connectivityManager.bindProcessToNetwork(network)
+                _connectionStatus.postValue(WifiConnectionState.CONNECTED)
+                cancelTimeout()
+                resetRetryCount()
             }
-            try {
-                // Adding a timeout for the request
-                connectivityManager.requestNetwork(networkRequest, currentNetworkCallback!!, 30000) // 30s
-            } catch (e: SecurityException) {
-                Log.e("WifiControllerQ", "SecurityException requesting network: ${e.message}", e)
-                _connectionStatus.postValue(WifiConnectionState.ERROR)
-            } catch (e: Exception) {
-                Log.e("WifiControllerQ", "Exception requesting network: ${e.message}", e)
+
+            override fun onUnavailable() {
+                super.onUnavailable()
+                Log.e(TAG, "NetworkCallback: UNAVAILABLE for $ssid.")
+                cancelTimeout()
+                scheduleRetry()
+            }
+
+            override fun onLost(network: Network) {
+                super.onLost(network)
+                Log.w(TAG, "NetworkCallback: LOST for $ssid.")
+                _connectionStatus.postValue(WifiConnectionState.DISCONNECTED)
+            }
+        }
+
+        currentNetworkCallback = callback
+        connectivityManager.requestNetwork(networkRequest, callback)
+    }
+
+    @Suppress("DEPRECATION")
+    private fun connectLegacy(context: Context, ssid: String, psk: String) {
+        val wifiConfig = WifiConfiguration()
+        wifiConfig.SSID = "\"$ssid\""
+        wifiConfig.preSharedKey = "\"$psk\""
+
+        if (!isReceiverRegistered) {
+            context.registerReceiver(
+                wifiStateReceiver,
+                IntentFilter(WifiManager.NETWORK_STATE_CHANGED_ACTION),
+            )
+            isReceiverRegistered = true
+        }
+
+        val existingConfig = wifiManager.configuredNetworks?.find { it.SSID == wifiConfig.SSID }
+        addedNetworkId = existingConfig?.networkId ?: wifiManager.addNetwork(wifiConfig)
+
+        if (addedNetworkId != -1) {
+            Log.d(TAG, "Legacy: Using networkId $addedNetworkId for $ssid")
+            wifiManager.disconnect()
+            val enabled = wifiManager.enableNetwork(addedNetworkId, true)
+            wifiManager.reconnect()
+            if (!enabled) {
+                Log.e(TAG, "Legacy: Failed to enable network $ssid")
                 _connectionStatus.postValue(WifiConnectionState.ERROR)
             }
         } else {
-            // Legacy connection method (pre-API 29)
-            val wifiConfig = WifiConfiguration()
-            wifiConfig.SSID = "\"$ssid\""
-            wifiConfig.preSharedKey = "\"$psk\""
-
-            // Ensure receiver is registered for legacy path
-            if (!isReceiverRegistered) {
-                context.registerReceiver(wifiStateReceiver, IntentFilter(WifiManager.NETWORK_STATE_CHANGED_ACTION))
-                isReceiverRegistered = true
-            }
-
-            val existingConfig = wifiManager.configuredNetworks?.find { it.SSID == wifiConfig.SSID }
-            addedNetworkId = existingConfig?.networkId ?: wifiManager.addNetwork(wifiConfig)
-
-            if (addedNetworkId != -1) {
-                Log.d("WifiControllerLegacy", "Using networkId $addedNetworkId for $ssid")
-                wifiManager.disconnect() // Disconnect from current to allow connection to new one
-                val enabled = wifiManager.enableNetwork(addedNetworkId, true)
-                val reconnected = wifiManager.reconnect()
-                Log.d("WifiControllerLegacy", "enableNetwork($addedNetworkId) success: $enabled, reconnect success: $reconnected")
-                if (!enabled) { // Reconnect might not immediately reflect success
-                    Log.e("WifiControllerLegacy", "Failed to enable network $ssid")
-                    _connectionStatus.postValue(WifiConnectionState.ERROR)
-                }
-                // Connection status for legacy is primarily updated by wifiStateReceiver
-            } else {
-                Log.e("WifiControllerLegacy", "Failed to add/find network configuration for $ssid. Network ID was -1.")
-                _connectionStatus.postValue(WifiConnectionState.ERROR)
-            }
+            Log.e(TAG, "Legacy: Failed to add/find network config for $ssid.")
+            _connectionStatus.postValue(WifiConnectionState.ERROR)
         }
     }
 
     fun disconnectFromWifi() {
-        Log.i("WifiController", "Disconnecting from WiFi (if managed by app for SSID: $currentTargetSsid)")
+        Log.i(TAG, "Disconnecting (target=$currentTargetSsid)")
+        cancelTimeout()
+        cancelRetry()
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             currentNetworkCallback?.let {
                 try {
                     connectivityManager.unregisterNetworkCallback(it)
-                    Log.d("WifiControllerQ", "NetworkCallback unregistered for $currentTargetSsid")
-                } catch (e: Exception) { // Catch broader exceptions like IllegalArgumentException
-                    Log.w("WifiControllerQ", "Error unregistering network callback: ${e.message}")
+                    Log.d(TAG, "NetworkCallback unregistered for $currentTargetSsid")
+                } catch (e: Exception) {
+                    Log.w(TAG, "Error unregistering callback: ${e.message}")
                 }
-                currentNetworkCallback = null
             }
-            connectivityManager.bindProcessToNetwork(null) // Unbind from any specific network
+            currentNetworkCallback = null
+            connectivityManager.bindProcessToNetwork(null)
         } else {
+            @Suppress("DEPRECATION")
             if (addedNetworkId != -1) {
-                // wifiManager.disableNetwork(addedNetworkId) // Optionally disable
-                // wifiManager.removeNetwork(addedNetworkId) // Careful: this removes the config
-                Log.d("WifiControllerLegacy", "Legacy: disconnecting from networkId $addedNetworkId ($currentTargetSsid)")
-                wifiManager.disconnect() // General disconnect
+                wifiManager.disconnect()
             }
             if (isReceiverRegistered) {
                 try {
                     context.unregisterReceiver(wifiStateReceiver)
-                    isReceiverRegistered = false
-                    Log.d("WifiControllerLegacy", "wifiStateReceiver unregistered.")
-                } catch (e: IllegalArgumentException) {
-                    Log.w("WifiControllerLegacy", "wifiStateReceiver not registered or already unregistered.")
-                }
+                } catch (_: IllegalArgumentException) { }
+                isReceiverRegistered = false
             }
         }
-        // Only set to disconnected if we were actively managing a connection.
-        // A general disconnectFromWifi might be called even if not connected to the target.
+
         if (_connectionStatus.value != WifiConnectionState.DISCONNECTED && currentTargetSsid != null) {
             _connectionStatus.postValue(WifiConnectionState.DISCONNECTED)
         }
-        currentTargetSsid = null // Clear the target after attempting disconnect
+        currentTargetSsid = null
         addedNetworkId = -1
     }
 
+    @Suppress("DEPRECATION")
     fun isCurrentlyConnectedToTarget(targetSsidToCheck: String?): Boolean {
         if (targetSsidToCheck == null || !wifiManager.isWifiEnabled) return false
 
@@ -203,16 +231,65 @@ class WifiController(private val context: Context) {
         val currentConnectedSsid = connectionInfo?.ssid?.replace("\"", "")
         val isConnected = connectionInfo?.networkId != -1 && currentConnectedSsid == targetSsidToCheck
 
-        // For API Q+, the _connectionStatus driven by NetworkCallback is more reliable for the *specific* request
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            return isConnected && _connectionStatus.value == WifiConnectionState.CONNECTED && this.currentTargetSsid == targetSsidToCheck
+            return isConnected &&
+                    _connectionStatus.value == WifiConnectionState.CONNECTED &&
+                    currentTargetSsid == targetSsidToCheck
         }
-        // For legacy, check connectionInfo and ensure it's the one we added/enabled
         return isConnected
     }
 
+    private fun cancelTimeout() {
+        timeoutRunnable?.let { handler.removeCallbacks(it) }
+        timeoutRunnable = null
+    }
+
+    private fun cancelRetry() {
+        retryRunnable?.let { handler.removeCallbacks(it) }
+        retryRunnable = null
+    }
+
+    @android.annotation.SuppressLint("MissingPermission")
+    private fun scheduleRetry() {
+        if (retryCount >= MAX_RETRIES) {
+            Log.e(TAG, "Max retries ($MAX_RETRIES) reached for $lastSsid. Giving up.")
+            retryCount = 0
+            _connectionStatus.postValue(WifiConnectionState.ERROR)
+            return
+        }
+        retryCount++
+        val delay = RETRY_DELAY_MS * retryCount
+        Log.i(TAG, "Scheduling WiFi retry #$retryCount in ${delay}ms for $lastSsid")
+        _connectionStatus.postValue(WifiConnectionState.CONNECTING)
+        cancelRetry()
+        val runnable = Runnable {
+            val ssid = lastSsid
+            val psk = lastPsk
+            if (ssid != null && psk != null) {
+                Log.i(TAG, "Retrying WiFi connection to $ssid (attempt #$retryCount)")
+                disconnectFromWifi()
+                currentTargetSsid = ssid
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    connectApi29Plus(ssid, psk)
+                } else {
+                    connectLegacy(context, ssid, psk)
+                }
+            }
+        }
+        retryRunnable = runnable
+        handler.postDelayed(runnable, delay)
+    }
+
+    /** Reset retry counter — call when a connection succeeds. */
+    private fun resetRetryCount() {
+        retryCount = 0
+        cancelRetry()
+    }
+
     fun cleanup() {
-        Log.d("WifiController", "Cleanup called.")
-        disconnectFromWifi() // Ensure callbacks/receivers are unregistered
+        Log.d(TAG, "Cleanup called.")
+        cancelTimeout()
+        cancelRetry()
+        disconnectFromWifi()
     }
 }

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!--
+        Permit cleartext (ws://) traffic to private/local network addresses.
+        Android matches <domain> entries for IPs literally (no subnet expansion),
+        so we allow all private RFC-1918 ranges via base-config since this app
+        only communicates with a local WebSocket server on the LAN.
+        Migrate to wss:// (TLS) if the server ever gains a certificate.
+    -->
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

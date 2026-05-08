@@ -1,12 +1,22 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
-    alias(libs.plugins.kotlin.compose)
 }
+
+// Load local.properties for secret defaults (file is gitignored)
+val localProperties = Properties().apply {
+    val localPropsFile = rootProject.file("local.properties")
+    if (localPropsFile.exists()) load(localPropsFile.inputStream())
+}
+
+fun localProp(key: String, fallback: String): String =
+    localProperties.getProperty(key, fallback)
 
 android {
     namespace = "com.example.nfcapp"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.example.nfcapp"
@@ -16,14 +26,25 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // Inject WiFi / WebSocket defaults from local.properties into BuildConfig
+        buildConfigField("String", "DEFAULT_WIFI_SSID", "\"${localProp("nfcapp.wifi.ssid", "")}\"")
+        buildConfigField("String", "DEFAULT_WIFI_PASSWORD", "\"${localProp("nfcapp.wifi.password", "")}\"")
+        buildConfigField("String", "DEFAULT_WS_IP", "\"${localProp("nfcapp.ws.ip", "10.0.0.1")}\"")
+        buildConfigField("String", "DEFAULT_WS_PORT", "\"${localProp("nfcapp.ws.port", "8080")}\"")
+    }
+
+    buildFeatures {
+        buildConfig = true
     }
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro"
+                "proguard-rules.pro",
             )
         }
     }
@@ -34,35 +55,20 @@ android {
     kotlinOptions {
         jvmTarget = "11"
     }
-    buildFeatures {
-        compose = true
-    }
 }
 
 dependencies {
-
     implementation(libs.androidx.core.ktx)
-    implementation(libs.androidx.lifecycle.runtime.ktx)
-    implementation(libs.androidx.activity.compose)
-    implementation(platform(libs.androidx.compose.bom))
-    implementation(libs.androidx.ui)
-    implementation(libs.androidx.ui.graphics)
-    implementation(libs.androidx.ui.tooling.preview)
-    implementation(libs.androidx.material3)
     implementation(libs.androidx.appcompat)
+    implementation(libs.androidx.activity.ktx)
+    implementation(libs.androidx.lifecycle.runtime.ktx)
+    implementation(libs.androidx.lifecycle.viewmodel.ktx)
+    implementation(libs.androidx.lifecycle.livedata.ktx)
+    implementation(libs.okhttp)
+    implementation(libs.logging.interceptor)
+    implementation(libs.androidx.security.crypto)
+
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
-    androidTestImplementation(platform(libs.androidx.compose.bom))
-    androidTestImplementation(libs.androidx.ui.test.junit4)
-    debugImplementation(libs.androidx.ui.tooling)
-    debugImplementation(libs.androidx.ui.test.manifest)
-
-    implementation(libs.okhttp) // Or latest version
-    implementation(platform(libs.okhttp.bom)) // For consistent versions
-    implementation(libs.logging.interceptor) // Optional, for debugging
-    implementation(libs.androidx.lifecycle.viewmodel.ktx) // Or latest version
-    implementation(libs.androidx.lifecycle.livedata.ktx) // For LiveData, if preferred over StateFlow
-    implementation(libs.androidx.activity.ktx) // For by viewModels() delegate
-    implementation(libs.androidx.security.crypto)
 }

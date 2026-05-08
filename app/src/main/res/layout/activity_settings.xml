@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fillViewport="true"
+    tools:context=".SettingsActivity">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="24dp">
+
+        <!-- WiFi SSID -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/label_wifi_ssid"
+            android:textStyle="bold"
+            android:layout_marginTop="8dp" />
+
+        <EditText
+            android:id="@+id/editWifiSsid"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:inputType="text"
+            android:hint="@string/label_wifi_ssid"
+            android:autofillHints="username"
+            android:layout_marginBottom="16dp" />
+
+        <!-- WiFi Password -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/label_wifi_password"
+            android:textStyle="bold" />
+
+        <EditText
+            android:id="@+id/editWifiPassword"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:inputType="textPassword"
+            android:hint="@string/label_wifi_password"
+            android:autofillHints="password"
+            android:layout_marginBottom="16dp" />
+
+        <!-- WebSocket IP -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/label_ws_ip"
+            android:textStyle="bold" />
+
+        <EditText
+            android:id="@+id/editWsIp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:inputType="text"
+            android:hint="@string/label_ws_ip"
+            android:importantForAutofill="no"
+            android:layout_marginBottom="16dp" />
+
+        <!-- WebSocket Port -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/label_ws_port"
+            android:textStyle="bold" />
+
+        <EditText
+            android:id="@+id/editWsPort"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:inputType="number"
+            android:hint="@string/label_ws_port"
+            android:importantForAutofill="no"
+            android:layout_marginBottom="24dp" />
+
+        <!-- Save button -->
+        <Button
+            android:id="@+id/buttonSave"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/button_save"
+            android:layout_marginBottom="8dp" />
+
+        <!-- Reset to defaults -->
+        <Button
+            android:id="@+id/buttonResetDefaults"
+            style="?android:attr/borderlessButtonStyle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/button_reset_defaults"
+            android:textColor="@color/error_red" />
+
+    </LinearLayout>
+</ScrollView>

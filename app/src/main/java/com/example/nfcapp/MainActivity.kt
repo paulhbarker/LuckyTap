@@ -1,38 +1,59 @@
 package com.example.nfcapp
 
+import android.Manifest
 import android.animation.ArgbEvaluator
 import android.animation.ValueAnimator
 import android.annotation.SuppressLint
 import android.app.PendingIntent
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.nfc.*
-import android.nfc.tech.Ndef
-import android.os.Bundle
-import android.os.Parcelable
-import android.util.Log
-import android.view.View
-import android.view.animation.AccelerateDecelerateInterpolator
-import android.widget.*
-import androidx.appcompat.app.AppCompatActivity
-import androidx.core.content.ContextCompat
-import java.nio.charset.Charset
-import android.content.Context
-import android.view.inputmethod.InputMethodManager
+import android.content.pm.PackageManager
+import android.location.LocationManager
+import android.media.Ringtone
 import android.media.RingtoneManager
 import android.net.Uri
-import androidx.lifecycle.Observer
+import android.net.wifi.WifiManager
+import android.nfc.NfcAdapter
+import android.nfc.Tag
+import android.nfc.tech.Ndef
+import android.os.Build
+import android.os.Bundle
+import android.provider.Settings
+import android.text.Editable
+import android.text.TextWatcher
+import android.util.Log
+import android.view.View
+import android.view.WindowManager
+import android.view.animation.AccelerateDecelerateInterpolator
+import android.view.inputmethod.InputMethodManager
+import android.widget.Button
+import android.widget.EditText
+import android.widget.FrameLayout
+import android.widget.LinearLayout
+import android.widget.TextView
+import android.widget.Toast
+import androidx.activity.OnBackPressedCallback
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.annotation.RequiresPermission
+import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.launch
 
 class MainActivity : AppCompatActivity() {
 
+    // --- Views ---
     private lateinit var editTextNumber: EditText
     private lateinit var buttonWriteNfc: Button
     private lateinit var buttonReadNfc: Button
     private lateinit var textViewStatus: TextView
     private lateinit var rootLayout: FrameLayout
     private lateinit var mainContentLayout: LinearLayout
-    private lateinit var progressBarScanning: ProgressBar
     private lateinit var textViewSuccessNumber: TextView
     private lateinit var scanningBar: View
     private lateinit var buttonCheckInNfc: Button
@@ -40,35 +61,228 @@ class MainActivity : AppCompatActivity() {
     private lateinit var webSocketStatusIndicator: View
     private lateinit var buttonResetGame: Button
     private lateinit var buttonClearScans: Button
+    private lateinit var buttonSettings: Button
 
-    // NFC System objects (Activity still needs to manage these for foreground dispatch)
+    // --- NFC ---
     private var nfcAdapter: NfcAdapter? = null
     private var pendingIntent: PendingIntent? = null
     private var intentFiltersArray: Array<IntentFilter>? = null
     private var techListsArray: Array<Array<String>>? = null
 
-    // Animator for scanning bar (still managed by Activity for UI direct manipulation)
+    // --- Animation ---
     private var scanningBarAnimator: ValueAnimator? = null
+    private companion object {
+        const val ANIMATION_DURATION_MS = 300L
+    }
 
-    // Constants for UI animation (can stay here or move to companion object if shared more)
-    private val ANIMATION_DURATION_MS = 300L
+    // --- Sound ---
+    private var ringtone: Ringtone? = null
+    private val notificationUri: Uri by lazy {
+        RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+    }
 
-    // ViewModel instance
+    // --- Dependencies ---
     private val viewModel: NfcAppViewModel by viewModels()
+    private lateinit var wifiController: WifiController
+    private val appPreferences: AppPreferences by lazy { AppPreferences.getInstance(this) }
+
+    // --- Activity Result Launchers ---
+    private val requestPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { _ ->
+            // Re-check live — the result map can return false for ACCESS_FINE_LOCATION when:
+            // (a) Android 12+ user picked "Approximate" instead of "Precise" location, or
+            // (b) system auto-denied without showing the dialog (permanently denied state).
+            // checkSelfPermission is always the ground truth.
+            val fineLocationGranted =
+                ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) ==
+                        PackageManager.PERMISSION_GRANTED
+
+            if (!fineLocationGranted) {
+                val permanentlyDenied = !shouldShowRequestPermissionRationale(
+                    Manifest.permission.ACCESS_FINE_LOCATION
+                )
+                if (permanentlyDenied) {
+                    // User selected "Don't ask again" — direct them to App Settings
+                    Log.w("Permissions", "ACCESS_FINE_LOCATION permanently denied; opening App Settings.")
+                    Toast.makeText(this, R.string.toast_location_permission_settings, Toast.LENGTH_LONG).show()
+                    val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                        data = Uri.fromParts("package", packageName, null)
+                    }
+                    startActivity(intent)
+                } else {
+                    Toast.makeText(this, R.string.toast_location_permission_essential, Toast.LENGTH_LONG).show()
+                }
+            }
+
+            if (fineLocationGranted) {
+                Log.d("Permissions", "All critical permissions granted.")
+                initiateWifiConnectionSequence()
+            } else {
+                viewModel.setWifiConnected(connected = false)
+            }
+        }
+
+    private val wifiEnableLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+            val wifiManager = applicationContext.getSystemService(WIFI_SERVICE) as WifiManager?
+            if (wifiManager?.isWifiEnabled == true) {
+                Log.d("MainActivity", "WiFi enabled after settings panel.")
+                initiateWifiConnectionSequence()
+            } else {
+                Log.w("MainActivity", "WiFi still not enabled.")
+                Toast.makeText(this, R.string.toast_wifi_required, Toast.LENGTH_LONG).show()
+                viewModel.setWifiConnected(connected = false)
+            }
+        }
+
+    private val locationEnableLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+            if (isLocationServiceEnabled()) {
+                Log.d("MainActivity", "Location services enabled after settings.")
+                initiateWifiConnectionSequence()
+            } else {
+                Log.w("MainActivity", "Location services still not enabled.")
+                Toast.makeText(this, R.string.toast_location_required, Toast.LENGTH_LONG).show()
+                viewModel.setWifiConnected(connected = false)
+            }
+        }
+
+    private val settingsLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+            viewModel.onPreferencesChanged()
+        }
+
+    // --- WiFi State Receiver ---
+    private var isReceiverRegistered = false
+    private val wifiStateReceiver = object : BroadcastReceiver() {
+        @Suppress("DEPRECATION")
+        override fun onReceive(context: Context, intent: Intent) {
+            when (intent.action) {
+                WifiManager.NETWORK_STATE_CHANGED_ACTION -> {
+                    val networkInfo = intent.getParcelableExtra<android.net.NetworkInfo>(WifiManager.EXTRA_NETWORK_INFO)
+                    if (networkInfo?.isConnected == true) {
+                        wifiController.isCurrentlyConnectedToTarget(appPreferences.getEffectiveWifiSsid())
+                        viewModel.setWifiConnected(connected = true)
+                    } else if (networkInfo?.isConnected == false) {
+                        viewModel.setWifiConnected(connected = false)
+                    }
+                }
+                WifiManager.WIFI_STATE_CHANGED_ACTION -> {
+                    val wifiState = intent.getIntExtra(WifiManager.EXTRA_WIFI_STATE, WifiManager.WIFI_STATE_UNKNOWN)
+                    if (wifiState == WifiManager.WIFI_STATE_DISABLED) {
+                        viewModel.setWifiConnected(false)
+                    }
+                }
+            }
+        }
+    }
+
+    // ========================================================================
+    // Lifecycle
+    // ========================================================================
 
     @SuppressLint("WrongConstant")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        // Initialize all UI elements
+        wifiController = WifiController(this)
+
+        initializeViews()
+
+        nfcAdapter = NfcAdapter.getDefaultAdapter(this)
+        if (nfcAdapter == null) {
+            Toast.makeText(this, R.string.toast_nfc_not_available, Toast.LENGTH_LONG).show()
+            finish()
+            return
+        }
+
+        setupNfcForegroundDispatch()
+        checkAndRequestPermissions()
+        setupViewModelObservers()
+        setupUiEventListeners()
+        setupBackNavigation()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        nfcAdapter?.enableForegroundDispatch(this, pendingIntent, intentFiltersArray, techListsArray)
+
+        // Only register WiFi receiver if we have the necessary permissions
+        if (arePermissionsGranted()) {
+            val intentFilter = IntentFilter().apply {
+                addAction(WifiManager.NETWORK_STATE_CHANGED_ACTION)
+                addAction(WifiManager.WIFI_STATE_CHANGED_ACTION)
+            }
+            registerReceiver(wifiStateReceiver, intentFilter)
+            isReceiverRegistered = true
+        }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        nfcAdapter?.disableForegroundDispatch(this)
+        if (isReceiverRegistered) {
+            unregisterReceiver(wifiStateReceiver)
+            isReceiverRegistered = false
+        }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        ringtone?.stop()
+        ringtone = null
+        wifiController.cleanup()
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        Log.d("NFC", "onNewIntent: ${intent.action}, state=${viewModel.uiState.value}")
+
+        if (viewModel.uiState.value == AppUiState.SUCCESS_DISPLAY) return
+
+        if (viewModel.uiState.value != AppUiState.SCANNING &&
+            viewModel.currentNfcMode.value != NfcOperationMode.WRITE
+        ) {
+            viewModel.onNfcTagScanFailed(getString(R.string.nfc_not_active_mode))
+            return
+        }
+
+        val tag: Tag? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            intent.getParcelableExtra(NfcAdapter.EXTRA_TAG, Tag::class.java)
+        } else {
+            @Suppress("DEPRECATION")
+            intent.getParcelableExtra(NfcAdapter.EXTRA_TAG)
+        }
+
+        if (tag == null) {
+            viewModel.onNfcTagScanFailed(getString(R.string.nfc_no_tag_in_intent))
+            return
+        }
+
+        when (viewModel.currentNfcMode.value) {
+            NfcOperationMode.WRITE -> handleNfcWrite(tag)
+            NfcOperationMode.READ, NfcOperationMode.CHECK_IN, NfcOperationMode.CHECK_OUT -> {
+                val result = NfcHelper.readFromIntent(intent)
+                viewModel.onNfcTagScannedForRead(result)
+            }
+            NfcOperationMode.NONE -> {
+                viewModel.onNfcTagScanFailed(getString(R.string.nfc_no_operation))
+            }
+        }
+    }
+
+    // ========================================================================
+    // Setup
+    // ========================================================================
+
+    private fun initializeViews() {
         rootLayout = findViewById(R.id.rootLayout)
         mainContentLayout = findViewById(R.id.mainContentLayout)
         editTextNumber = findViewById(R.id.editTextNumber)
         buttonWriteNfc = findViewById(R.id.buttonWriteNfc)
         buttonReadNfc = findViewById(R.id.buttonReadNfc)
         textViewStatus = findViewById(R.id.textViewStatus)
-        progressBarScanning = findViewById(R.id.progressBarScanning)
         textViewSuccessNumber = findViewById(R.id.textViewSuccessNumber)
         scanningBar = findViewById(R.id.scanningBar)
         webSocketStatusIndicator = findViewById(R.id.webSocketStatusIndicator)
@@ -76,347 +290,387 @@ class MainActivity : AppCompatActivity() {
         buttonCheckOutNfc = findViewById(R.id.buttonCheckOutNfc)
         buttonResetGame = findViewById(R.id.buttonResetGame)
         buttonClearScans = findViewById(R.id.buttonClearScans)
+        buttonSettings = findViewById(R.id.buttonSettings)
+    }
 
-        nfcAdapter = NfcAdapter.getDefaultAdapter(this)
-        if (nfcAdapter == null) {
-            Toast.makeText(this, "NFC is not available on this device.", Toast.LENGTH_LONG).show()
-            finish()
-            return
-        }
-
+    @SuppressLint("WrongConstant")
+    private fun setupNfcForegroundDispatch() {
         val intent = Intent(this, javaClass).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
         var flags = PendingIntent.FLAG_UPDATE_CURRENT
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             flags = flags or PendingIntent.FLAG_MUTABLE
         }
         pendingIntent = PendingIntent.getActivity(this, 0, intent, flags)
 
         val ndefIntentFilter = IntentFilter(NfcAdapter.ACTION_NDEF_DISCOVERED)
         try {
-            ndefIntentFilter.addDataType("text/plain") // Or your custom mime type
+            ndefIntentFilter.addDataType("text/plain")
         } catch (e: IntentFilter.MalformedMimeTypeException) {
-            Log.e("NFCSetup", "Malformed Mime Type", e)
             throw RuntimeException("Failed to add Mime Type.", e)
         }
         intentFiltersArray = arrayOf(ndefIntentFilter)
         techListsArray = arrayOf(arrayOf(Ndef::class.java.name))
-        // --- End NFC Setup ---
-
-        setupViewModelObservers()
-        setupUIEventListeners()
-
-        // Initial validation for write button from ViewModel's state (if any)
-        viewModel.isWriteButtonEnabled.value?.let { buttonWriteNfc.isEnabled = it }
     }
+
+    @SuppressLint("MissingPermission") // initiateWifiConnectionSequence() is only called after verifying all permissions via checkSelfPermission
+    private fun checkAndRequestPermissions() {
+        val requiredPermissions = mutableListOf(
+            Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.ACCESS_WIFI_STATE,
+            Manifest.permission.CHANGE_WIFI_STATE,
+            Manifest.permission.ACCESS_NETWORK_STATE,
+            Manifest.permission.INTERNET,
+        )
+
+        val permissionsToRequest = requiredPermissions.filter {
+            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+        }.toTypedArray()
+
+        if (permissionsToRequest.isNotEmpty()) {
+            requestPermissionLauncher.launch(permissionsToRequest)
+        } else {
+            Log.d("Permissions", "All permissions already granted.")
+            initiateWifiConnectionSequence()
+        }
+    }
+
+    private fun setupBackNavigation() {
+        onBackPressedDispatcher.addCallback(
+            this,
+            object : OnBackPressedCallback(true) {
+                override fun handleOnBackPressed() {
+                    val state = viewModel.uiState.value
+                    if ((state == AppUiState.SCANNING) || (state == AppUiState.SUCCESS_DISPLAY)) {
+                        viewModel.onBackButtonPressed()
+                    } else {
+                        isEnabled = false
+                        onBackPressedDispatcher.onBackPressed()
+                        isEnabled = true
+                    }
+                }
+            },
+        )
+    }
+
+    // ========================================================================
+    // Observers (StateFlow collection)
+    // ========================================================================
 
     private fun setupViewModelObservers() {
-        viewModel.uiState.observe(this, Observer { state ->
-            updateUiForState(state ?: AppUiState.NORMAL)
-        })
+        // Bridge WifiController LiveData (not a suspend collector)
+        observeWifiControllerStatus()
 
-        viewModel.currentNfcMode.observe(this, Observer { mode ->
-            // Optional: Update UI based on NFC mode if not covered by general UiState
-            // e.g., specific text for "Ready to Check In" vs "Ready to Read"
-            // For now, most visual changes are driven by AppUiState
-            Log.d("MainActivity", "NFC Mode changed to: $mode")
-        })
-
-        viewModel.nfcStatusMessage.observe(this, Observer { message ->
-            if (viewModel.uiState.value == AppUiState.NORMAL) {
-                if (message != null) {
-                    textViewStatus.text = "Status: $message"
-                    // If you also want to show the last known WS status alongside:
-                    // val lastWsMsg = viewModel.webSocketStatus.value?.message ?: ""
-                    // if (lastWsMsg.isNotBlank()) {
-                    //    textViewStatus.append("\n$lastWsMsg")
-                    // }
-                } else if (viewModel.uiState.value == AppUiState.NORMAL && viewModel.currentNfcMode.value == NfcOperationMode.NONE) {
-                    // If message is null and we are truly idle, reset to default idle text
-                    textViewStatus.text = "Status: Idle. Select an action."
-                }
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                launch { collectUiState() }
+                launch { collectNumberForSuccessDisplay() }
+                launch { collectIsWriteButtonEnabled() }
+                launch { collectWebSocketConnectionState() }
+                launch { collectAreEssentialConnectionsActive() }
+                launch { collectConnectionStatusText() }
+                launch { collectUiEvents() }
             }
-            // Optional: Show Toasts for important NFC messages regardless of UI state
-            // message?.let { Toast.makeText(this, it, Toast.LENGTH_SHORT).show() }
-        })
-
-        viewModel.webSocketStatus.observe(this, Observer { update ->
-            // Only update textViewStatus if in NORMAL UI mode and not during scanning/success
-            if (viewModel.uiState.value == AppUiState.NORMAL) {
-                // Combine with existing NFC status or replace it.
-                // For simplicity, let's assume WebSocket status is an addition to any NFC status.
-                // If you want it to be the *only* thing, then:
-                // textViewStatus.text = update.message
-                // If you want to combine, manage a base status from nfcStatusMessage
-                // and append WebSocket updates carefully.
-
-                // Let's make it so that nfcStatusMessage is primary, and wsStatus is secondary if nfcStatus is generic.
-                val currentNfcStatus = viewModel.nfcStatusMessage.value
-                if (currentNfcStatus != null && !currentNfcStatus.startsWith("Status: Idle")) {
-                    // If there's a specific NFC operation status, append WS status to it.
-                    textViewStatus.text = "Status: $currentNfcStatus\n${update.message}"
-                } else {
-                    // If NFC status is idle or null, WS status can be more prominent.
-                    textViewStatus.text = update.message // Show only the latest WebSocket message
-                }
-            }
-            Log.d("MainActivity", "WebSocket Update: ${update.message}") // Keep logging all updates
-        })
-
-        viewModel.numberForSuccessDisplay.observe(this, Observer { number ->
-            if (number != null) {
-                playNotificationSound() // Sound still triggered by Activity for context
-                showSuccessNumberAnimation(number)
-            }
-        })
-
-        viewModel.isWriteButtonEnabled.observe(this, Observer { isEnabled ->
-            buttonWriteNfc.isEnabled = isEnabled
-        })
-
-        viewModel.webSocketConnectionState.observe(this, Observer { state ->
-            val colorRes = when (state) {
-                WebSocketConnectionState.CONNECTED -> R.color.ws_status_connected
-                WebSocketConnectionState.CONNECTING -> R.color.ws_status_connecting
-                WebSocketConnectionState.CLOSING -> R.color.ws_status_connecting // Or a specific closing color
-                WebSocketConnectionState.DISCONNECTED, null -> R.color.ws_status_disconnected
-            }
-            webSocketStatusIndicator.setBackgroundColor(ContextCompat.getColor(this, colorRes))
-            // Visibility will be handled by updateUiForState
-        })
+        }
     }
 
-    private fun setupUIEventListeners() {
-        editTextNumber.addTextChangedListener(object : android.text.TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
-            override fun afterTextChanged(s: android.text.Editable?) {
-                viewModel.validateInputForWrite(s.toString())
+    private suspend fun collectUiState() {
+        viewModel.uiState.collect { state ->
+            updateUiForState(state)
+            if (state == AppUiState.SCANNING) {
+                window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            } else {
+                window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             }
-        })
+        }
+    }
+
+    private suspend fun collectNumberForSuccessDisplay() {
+        viewModel.numberForSuccessDisplay.collect { number ->
+            if (number != null) {
+                playNotificationSound()
+                showSuccessNumberAnimation(number)
+            }
+        }
+    }
+
+    private suspend fun collectIsWriteButtonEnabled() {
+        viewModel.isWriteButtonEnabled.collect { isEnabled ->
+            buttonWriteNfc.isEnabled = isEnabled
+        }
+    }
+
+    private suspend fun collectWebSocketConnectionState() {
+        viewModel.webSocketConnectionState.collect { state ->
+            val colorRes = when (state) {
+                WebSocketConnectionState.CONNECTED -> R.color.ws_status_connected
+                WebSocketConnectionState.CONNECTING,
+                WebSocketConnectionState.CLOSING,
+                -> R.color.ws_status_connecting
+                WebSocketConnectionState.DISCONNECTED -> R.color.ws_status_disconnected
+            }
+            webSocketStatusIndicator.setBackgroundColor(ContextCompat.getColor(this@MainActivity, colorRes))
+
+            // Update accessibility content description
+            val descRes = when (state) {
+                WebSocketConnectionState.CONNECTED -> R.string.cd_ws_status_connected
+                WebSocketConnectionState.CONNECTING,
+                WebSocketConnectionState.CLOSING,
+                -> R.string.cd_ws_status_connecting
+                WebSocketConnectionState.DISCONNECTED -> R.string.cd_ws_status_disconnected
+            }
+            webSocketStatusIndicator.contentDescription = getString(descRes)
+        }
+    }
+
+    /** Observe the WifiController's LiveData and bridge into the ViewModel. */
+    private fun observeWifiControllerStatus() {
+        wifiController.connectionStatus.observe(this) { state ->
+            val isConnected = state == WifiController.WifiConnectionState.CONNECTED
+            viewModel.setWifiConnected(isConnected)
+
+            if (state == WifiController.WifiConnectionState.ERROR) {
+                val wifiManager = applicationContext.getSystemService(WIFI_SERVICE) as WifiManager
+                if (!wifiManager.isWifiEnabled) {
+                    promptEnableWifi()
+                } else if (!isLocationServiceEnabled()) {
+                    promptEnableLocationServices()
+                }
+            }
+        }
+    }
+
+    private suspend fun collectAreEssentialConnectionsActive() {
+        viewModel.areEssentialConnectionsActive.collect { isActive ->
+            Log.i("MainActivity", "Essential connections active: $isActive")
+            updateButtonVisibility(isActive)
+        }
+    }
+
+    private suspend fun collectConnectionStatusText() {
+        viewModel.connectionStatusText.collect { text ->
+            if (text.isNotEmpty()) {
+                textViewStatus.text = text
+            }
+        }
+    }
+
+    private suspend fun collectUiEvents() {
+        viewModel.uiEvents.collect { event ->
+            when (event) {
+                is UiEvent.ShowToast -> {
+                    val duration = if (event.longDuration) Toast.LENGTH_LONG else Toast.LENGTH_SHORT
+                    Toast.makeText(this@MainActivity, event.message, duration).show()
+                }
+            }
+        }
+    }
+
+    // ========================================================================
+    // UI Event Listeners
+    // ========================================================================
+
+    private fun setupUiEventListeners() {
+        editTextNumber.addTextChangedListener(
+            object : TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+                override fun afterTextChanged(s: Editable?) {
+                    viewModel.validateInputForWrite(s.toString())
+                }
+            },
+        )
 
         buttonWriteNfc.setOnClickListener {
             hideKeyboard()
-            if (viewModel.uiState.value == AppUiState.SCANNING) { // User cancels scanning by tapping write
-                viewModel.resetToIdle() // ViewModel handles resetting states
+            if (viewModel.uiState.value == AppUiState.SCANNING) {
+                viewModel.resetToIdle()
             }
             viewModel.onWriteButtonModeSelected(
                 editTextNumber.text.toString(),
-                buttonWriteNfc.isEnabled // Pass current validity
+                buttonWriteNfc.isEnabled,
             )
-            // Toast for "Tap card" is now set by ViewModel's nfcStatusMessage
         }
 
-        buttonReadNfc.setOnClickListener {
-            hideKeyboard()
-            viewModel.onReadButtonModeSelected()
-            // Toast is managed via nfcStatusMessage or can be a generic "Scanning..." from UI state
-        }
+        buttonReadNfc.setOnClickListener { hideKeyboard(); viewModel.onReadButtonModeSelected() }
+        buttonCheckInNfc.setOnClickListener { hideKeyboard(); viewModel.onCheckInButtonModeSelected() }
+        buttonCheckOutNfc.setOnClickListener { hideKeyboard(); viewModel.onCheckOutButtonModeSelected() }
+        buttonResetGame.setOnClickListener { hideKeyboard(); viewModel.onResetGameButtonPressed() }
+        buttonClearScans.setOnClickListener { hideKeyboard(); viewModel.onClearScansButtonPressed() }
 
-        buttonCheckInNfc.setOnClickListener {
+        buttonSettings.setOnClickListener {
             hideKeyboard()
-            viewModel.onCheckInButtonModeSelected()
-        }
-
-        buttonCheckOutNfc.setOnClickListener {
-            hideKeyboard()
-            viewModel.onCheckOutButtonModeSelected()
-        }
-
-        buttonResetGame.setOnClickListener {
-            hideKeyboard()
-            viewModel.onResetGameButtonPressed()
-        }
-
-        buttonClearScans.setOnClickListener {
-            hideKeyboard()
-            viewModel.onClearScansButtonPressed()
+            settingsLauncher.launch(Intent(this, SettingsActivity::class.java))
         }
     }
 
+    // ========================================================================
+    // NFC
+    // ========================================================================
+
+    private fun handleNfcWrite(tag: Tag) {
+        val numberToWriteStr = editTextNumber.text.toString()
+        val num = numberToWriteStr.toIntOrNull()
+        if (num == null || num !in 1..100) {
+            viewModel.onNfcTagScannedForWrite(
+                tagData = numberToWriteStr,
+                success = false,
+                errorMessage = getString(R.string.nfc_invalid_number_at_tap),
+            )
+            return
+        }
+        val result = NfcHelper.writeToTag(tag, numberToWriteStr)
+        viewModel.onNfcTagScannedForWrite(
+            tagData = numberToWriteStr,
+            success = result.success,
+            errorMessage = result.error,
+        )
+    }
+
+    // ========================================================================
+    // WiFi Connection Sequence
+    // ========================================================================
+
+    @RequiresPermission(Manifest.permission.ACCESS_FINE_LOCATION)
+    private fun initiateWifiConnectionSequence() {
+        if (viewModel.isWifiConnectedToTarget.value) return
+
+        if (!arePermissionsGranted()) {
+            viewModel.setWifiConnected(connected = false)
+            return
+        }
+
+        val wifiManager = applicationContext.getSystemService(WIFI_SERVICE) as WifiManager?
+        if (wifiManager == null || !wifiManager.isWifiEnabled) {
+            promptEnableWifi()
+            viewModel.setWifiConnected(connected = false)
+            return
+        }
+
+        if (!isLocationServiceEnabled()) {
+            promptEnableLocationServices()
+            viewModel.setWifiConnected(connected = false)
+            return
+        }
+
+        val ssid = viewModel.getEffectiveWifiSsidForActivity()
+        val password = viewModel.getEffectiveWifiPasswordForActivity()
+        Log.i("MainActivity", "Initiating WiFi connection to '$ssid'")
+        wifiController.connectToWifi(applicationContext, ssid, password)
+    }
+
+    private fun promptEnableWifi() {
+        Toast.makeText(this, R.string.toast_enable_wifi, Toast.LENGTH_LONG).show()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            wifiEnableLauncher.launch(Intent(Settings.Panel.ACTION_WIFI))
+        }
+    }
+
+    private fun promptEnableLocationServices() {
+        Toast.makeText(this, R.string.toast_location_services_required, Toast.LENGTH_LONG).show()
+        locationEnableLauncher.launch(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+    }
+
+    private fun isLocationServiceEnabled(): Boolean {
+        val locationManager = getSystemService(LOCATION_SERVICE) as LocationManager
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            locationManager.isLocationEnabled
+        } else {
+            @Suppress("DEPRECATION")
+            try {
+                Settings.Secure.getInt(contentResolver, Settings.Secure.LOCATION_MODE) != Settings.Secure.LOCATION_MODE_OFF
+            } catch (_: Settings.SettingNotFoundException) {
+                false
+            }
+        }
+    }
+
+    private fun arePermissionsGranted(): Boolean {
+        return listOf(
+            Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.ACCESS_WIFI_STATE,
+            Manifest.permission.CHANGE_WIFI_STATE,
+        ).all {
+            ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
+        }
+    }
+
+    // ========================================================================
+    // UI State Management (consolidated visibility logic)
+    // ========================================================================
+
+    private fun updateButtonVisibility(areConnectionsActive: Boolean) {
+        if (viewModel.uiState.value != AppUiState.NORMAL) return
+        val visibility = if (areConnectionsActive) View.VISIBLE else View.GONE
+        editTextNumber.visibility = visibility
+        buttonWriteNfc.visibility = visibility
+        buttonReadNfc.visibility = visibility
+        buttonCheckInNfc.visibility = visibility
+        buttonCheckOutNfc.visibility = visibility
+        buttonResetGame.visibility = visibility
+        buttonClearScans.visibility = visibility
+    }
+
     private fun updateUiForState(newState: AppUiState) {
-        Log.d("MainActivity", "Updating UI for state: $newState")
-        // Stop animations before changing visibility
-        if (newState != AppUiState.SCANNING) {
-            stopScanningBarAnimation()
-        }
-        if (newState != AppUiState.SUCCESS_DISPLAY) {
-            textViewSuccessNumber.visibility = View.GONE
-        }
+        if (newState != AppUiState.SCANNING) stopScanningBarAnimation()
+        if (newState != AppUiState.SUCCESS_DISPLAY) textViewSuccessNumber.visibility = View.GONE
 
         webSocketStatusIndicator.visibility = if (newState == AppUiState.NORMAL) View.VISIBLE else View.GONE
-
-        // Default visibility for elements not directly tied to a single state
         mainContentLayout.visibility = View.GONE
         scanningBar.visibility = View.GONE
-        progressBarScanning.visibility = View.GONE // Hide the old spinner
 
-        val targetBackgroundColor = when (newState) {
+        val targetColor = when (newState) {
             AppUiState.SCANNING -> ContextCompat.getColor(this, R.color.scanning_background_black)
             AppUiState.SUCCESS_DISPLAY -> ContextCompat.getColor(this, R.color.success_green)
             AppUiState.NORMAL -> ContextCompat.getColor(this, R.color.default_background)
         }
-        animateBackgroundColor(targetBackgroundColor)
+        animateBackgroundColor(targetColor)
 
         when (newState) {
             AppUiState.NORMAL -> {
                 mainContentLayout.visibility = View.VISIBLE
-                editTextNumber.visibility = View.VISIBLE
-                buttonWriteNfc.visibility = View.VISIBLE
-                buttonReadNfc.visibility = View.VISIBLE
-                buttonCheckInNfc.visibility = View.VISIBLE
-                buttonCheckOutNfc.visibility = View.VISIBLE
                 textViewStatus.visibility = View.VISIBLE
-                if (viewModel.currentNfcMode.value == NfcOperationMode.NONE) {
-                    textViewStatus.text = "Status: Idle. Select an action." // Default
-                }
-                // nfcStatusMessage from ViewModel will override if set
+                // Delegate button visibility to the connection-aware method
+                updateButtonVisibility(viewModel.areEssentialConnectionsActive.value)
             }
             AppUiState.SCANNING -> {
-                // Hide all main content elements that are not part of scanning
-                mainContentLayout.visibility = View.GONE // Hides children like editText, buttons, statusText
                 scanningBar.visibility = View.VISIBLE
                 startScanningBarAnimation()
-                // Optional: A small, persistent "Scanning..." text if needed, separate from mainContentLayout
             }
             AppUiState.SUCCESS_DISPLAY -> {
-                // Success number animation is triggered by observing viewModel.numberForSuccessDisplay
-                // Background color already set
-                mainContentLayout.visibility = View.GONE
+                // Handled by numberForSuccessDisplay observer
             }
         }
     }
+
+    // ========================================================================
+    // Animations & Utilities
+    // ========================================================================
 
     private fun animateBackgroundColor(toColor: Int) {
-        val fromColor = (rootLayout.background as? android.graphics.drawable.ColorDrawable)?.color ?: ContextCompat.getColor(this, R.color.default_background)
-        val colorAnimation = ValueAnimator.ofObject(ArgbEvaluator(), fromColor, toColor)
-        colorAnimation.duration = ANIMATION_DURATION_MS
-        colorAnimation.addUpdateListener { animator -> rootLayout.setBackgroundColor(animator.animatedValue as Int) }
-        colorAnimation.start()
-    }
-
-    override fun onResume() {
-        super.onResume()
-        nfcAdapter?.enableForegroundDispatch(this, pendingIntent, intentFiltersArray, techListsArray)
-        // ViewModel handles WebSocket connection internally
-    }
-
-    override fun onPause() {
-        super.onPause()
-        nfcAdapter?.disableForegroundDispatch(this)
-    }
-
-    override fun onNewIntent(intent: Intent) {
-        super.onNewIntent(intent)
-        Log.d("NFC", "Activity onNewIntent: ${intent.action}")
-
-        if (viewModel.uiState.value == AppUiState.SUCCESS_DISPLAY) {
-            Log.d("NFC", "NFC tap while success animation is showing. Ignoring.")
-            return
+        val fromColor = (rootLayout.background as? android.graphics.drawable.ColorDrawable)?.color
+            ?: ContextCompat.getColor(this, R.color.default_background)
+        ValueAnimator.ofObject(ArgbEvaluator(), fromColor, toColor).apply {
+            duration = ANIMATION_DURATION_MS
+            addUpdateListener { rootLayout.setBackgroundColor(it.animatedValue as Int) }
+            start()
         }
-
-        val tag: Tag? = intent.getParcelableExtra(NfcAdapter.EXTRA_TAG)
-        if (tag == null) {
-            viewModel.onNfcTagScanFailed("Error: No tag found in intent.")
-            return
-        }
-
-        when (viewModel.currentNfcMode.value) {
-            NfcOperationMode.WRITE -> {
-                val numberToWriteStr = editTextNumber.text.toString() // Get from UI at the moment of tap
-                // Basic validation again before actual write attempt
-                val num = numberToWriteStr.toIntOrNull()
-                if (num == null || num < 1 || num > 100) {
-                    viewModel.onNfcTagScannedForWrite(numberToWriteStr, false, "Invalid number at time of tap.")
-                    return
-                }
-                performNfcWrite(tag, numberToWriteStr)
-            }
-            NfcOperationMode.READ, NfcOperationMode.CHECK_IN, NfcOperationMode.CHECK_OUT -> {
-                performNfcRead(intent)
-            }
-            NfcOperationMode.NONE, null -> {
-                viewModel.onNfcTagScanFailed("NFC detected, but no operation selected.")
-            }
-        }
-    }
-
-    // --- NFC Read/Write Operations (called by onNewIntent, results sent to ViewModel) ---
-    private fun performNfcWrite(tag: Tag, dataToWrite: String) {
-        val textRecord = NdefRecord.createTextRecord("en", dataToWrite)
-        val ndefMessage = NdefMessage(arrayOf(textRecord))
-        var success = false
-        var errorMessage: String? = null
-
-        try {
-            val ndef = Ndef.get(tag)
-            if (ndef != null) {
-                ndef.connect()
-                if (ndef.maxSize < ndefMessage.toByteArray().size) {
-                    errorMessage = "Tag too small."
-                } else {
-                    ndef.writeNdefMessage(ndefMessage)
-                    success = true
-                }
-                ndef.close()
-            } else {
-                errorMessage = "Tag is not NDEF formatted."
-            }
-        } catch (e: Exception) {
-            Log.e("NFCWrite", "Error writing to NFC", e)
-            errorMessage = e.message ?: "Exception during write."
-        }
-        viewModel.onNfcTagScannedForWrite(dataToWrite, success, errorMessage)
-    }
-
-    private fun performNfcRead(intent: Intent) {
-        val rawMessages: Array<Parcelable>? = intent.getParcelableArrayExtra(NfcAdapter.EXTRA_NDEF_MESSAGES)
-        if (rawMessages != null && rawMessages.isNotEmpty()) {
-            try {
-                val messages = rawMessages.map { it as NdefMessage }
-                val record = messages[0].records[0]
-                val payload = record.payload
-                val textEncoding = if ((payload[0].toInt() and 128) == 0) "UTF-8" else "UTF-16"
-                val languageCodeLength = payload[0].toInt() and 63
-                val text = String(payload, languageCodeLength + 1, payload.size - languageCodeLength - 1, Charset.forName(textEncoding))
-
-                viewModel.onNfcTagScannedForRead(NfcScanResult(success = true, data = text))
-                return
-            } catch (e: Exception) {
-                Log.e("NFCRead", "Error parsing NDEF data", e)
-                viewModel.onNfcTagScannedForRead(NfcScanResult(success = false, error = "Malformed NDEF Data: ${e.message}"))
-                return
-            }
-        }
-        viewModel.onNfcTagScannedForRead(NfcScanResult(success = false, error = "No NDEF messages found on tag."))
     }
 
     private fun startScanningBarAnimation() {
-        stopScanningBarAnimation() // Ensure any previous animation is stopped
-
-        // Ensure the bar is visible and at the top before starting
+        stopScanningBarAnimation()
         scanningBar.visibility = View.VISIBLE
         scanningBar.translationY = 0f
-
-        // Get the height of the root layout to determine animation bounds
-        // We need to wait for the layout to be measured if it's not already
-        rootLayout.post { // Ensures we get dimensions after layout pass
+        rootLayout.post {
             val screenHeight = rootLayout.height.toFloat()
             val barHeight = scanningBar.height.toFloat()
-
-            if (screenHeight <= 0 || barHeight <= 0) {
-                Log.e("ScanningAnim", "Cannot start animation, dimensions not ready or invalid.")
-                return@post
-            }
+            if (screenHeight <= 0 || barHeight <= 0) return@post
 
             scanningBarAnimator = ValueAnimator.ofFloat(0f, screenHeight - barHeight).apply {
-                duration = 800 // Duration for one full sweep (top to bottom)
-                repeatMode = ValueAnimator.REVERSE // Go up after reaching bottom
-                repeatCount = ValueAnimator.INFINITE // Repeat indefinitely
-                interpolator = AccelerateDecelerateInterpolator() // Smooth start and end
-
-                addUpdateListener { animation ->
-                    scanningBar.translationY = animation.animatedValue as Float
-                }
+                duration = 800
+                repeatMode = ValueAnimator.REVERSE
+                repeatCount = ValueAnimator.INFINITE
+                interpolator = AccelerateDecelerateInterpolator()
+                addUpdateListener { scanningBar.translationY = it.animatedValue as Float }
             }
             scanningBarAnimator?.start()
         }
@@ -425,72 +679,41 @@ class MainActivity : AppCompatActivity() {
     private fun stopScanningBarAnimation() {
         scanningBarAnimator?.cancel()
         scanningBarAnimator = null
-        scanningBar.visibility = View.GONE // Hide bar when animation stops
+        scanningBar.visibility = View.GONE
     }
 
-    private fun showSuccessNumberAnimation(number: String) { // Unchanged, triggered by ViewModel
-        // Stop scanning bar animation if it was running
+    private fun showSuccessNumberAnimation(number: String) {
         stopScanningBarAnimation()
-
-        // Ensure other elements are hidden
         mainContentLayout.visibility = View.GONE
         scanningBar.visibility = View.GONE
-        // ... (other elements like editTextNumber, buttons should already be managed by updateUiForState)
-
         textViewSuccessNumber.text = number
+        textViewSuccessNumber.contentDescription = getString(R.string.cd_scanned_number, number)
         textViewSuccessNumber.visibility = View.VISIBLE
         textViewSuccessNumber.alpha = 0f
         textViewSuccessNumber.scaleX = 0.5f
         textViewSuccessNumber.scaleY = 0.5f
-
-        // Background color animation is now triggered by updateUiForState via ViewModel
-        // animateBackgroundColor(ContextCompat.getColor(this, R.color.success_green))
-
         textViewSuccessNumber.animate()
             .alpha(1f)
             .scaleX(1f)
             .scaleY(1f)
             .setDuration(ANIMATION_DURATION_MS)
             .setInterpolator(AccelerateDecelerateInterpolator())
-            .withEndAction {
-                // The ViewModel will handle transitioning back to SCANNING or NORMAL
-                // after its internal delay in onNfcTagScannedForRead.
-            }
             .start()
     }
 
     private fun hideKeyboard() {
-        val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-        // Find the currently focused view, so we can grab the correct window token from it.
-        var view = currentFocus
-        // If no view currently has focus, create a new one, just so we can grab a window token from it
-        if (view == null) {
-            view = View(this)
-        }
+        val imm = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
+        val view = currentFocus ?: View(this)
         imm.hideSoftInputFromWindow(view.windowToken, 0)
     }
 
     private fun playNotificationSound() {
         try {
-            val notificationSoundUri: Uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
-            val r = RingtoneManager.getRingtone(applicationContext, notificationSoundUri)
-            r.play()
+            ringtone?.stop()
+            ringtone = RingtoneManager.getRingtone(applicationContext, notificationUri)
+            ringtone?.play()
         } catch (e: Exception) {
             Log.e("Sound", "Error playing notification sound", e)
-            // Optionally, you could fall back to a Toast or log if sound fails
         }
-    }
-
-    override fun onBackPressed() {
-        // Let ViewModel decide if it handles back press for its states
-        if (viewModel.uiState.value == AppUiState.SCANNING || viewModel.uiState.value == AppUiState.SUCCESS_DISPLAY) {
-            viewModel.onBackButtonPressed()
-        } else {
-            super.onBackPressed()
-        }
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
     }
 }

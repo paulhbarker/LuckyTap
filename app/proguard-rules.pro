@@ -5,17 +5,26 @@
 # For more details, see
 #   http://developer.android.com/guide/developing/tools/proguard.html
 
-# If your project uses WebView with JS, uncomment the following
-# and specify the fully qualified class name to the JavaScript interface
-# class:
-#-keepclassmembers class fqcn.of.javascript.interface.for.webview {
-#   public *;
-#}
+# Preserve line numbers for meaningful stack traces
+-keepattributes SourceFile,LineNumberTable
+-renamesourcefileattribute SourceFile
 
-# Uncomment this to preserve the line number information for
-# debugging stack traces.
-#-keepattributes SourceFile,LineNumberTable
+# --- OkHttp ---
+# OkHttp 4.x bundles its own consumer rules, but the platform check and optional
+# dependencies benefit from explicit keeps to prevent warnings.
+-dontwarn okhttp3.internal.platform.**
+-dontwarn org.conscrypt.**
+-dontwarn org.bouncycastle.**
+-dontwarn org.openjsse.**
 
-# If you keep the line number information, uncomment this to
-# hide the original source file name.
-#-renamesourcefileattribute SourceFile
+# --- OkHttp Logging Interceptor ---
+-keep class okhttp3.logging.** { *; }
+
+# --- AndroidX Security (EncryptedSharedPreferences) ---
+# Tink uses reflection internally
+-keep class com.google.crypto.tink.** { *; }
+-dontwarn com.google.crypto.tink.**
+
+# --- Project-specific ---
+# Keep WebSocket listener callbacks (called reflectively by OkHttp)
+-keep class com.example.nfcapp.WebSocketManager { *; }

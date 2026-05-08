@@ -14,101 +14,109 @@
         android:layout_width="match_parent"
         android:layout_height="32dp"
         android:layout_gravity="top"
-        android:background="@color/ws_status_connecting" />
+        android:background="@color/ws_status_connecting"
+        android:contentDescription="@string/cd_ws_status_connecting"
+        android:importantForAccessibility="yes" />
 
-
-    <!-- Main content area -->
-    <LinearLayout
-        android:id="@+id/mainContentLayout"
+    <!-- Scrollable main content area -->
+    <ScrollView
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:orientation="vertical"
-        android:padding="32dp"
-        android:gravity="center"
-        android:layout_marginTop="16dp">
+        android:layout_marginTop="32dp"
+        android:fillViewport="true">
 
-        <EditText
-            android:id="@+id/editTextNumber"
+        <LinearLayout
+            android:id="@+id/mainContentLayout"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:hint="Enter number (1-100) to write"
-            android:inputType="number"
-            android:layout_marginBottom="16dp"/>
+            android:orientation="vertical"
+            android:padding="32dp"
+            android:gravity="center">
 
-        <Button
-            android:id="@+id/buttonWriteNfc"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="WRITE to NFC"
-            android:layout_marginBottom="8dp"/>
+            <EditText
+                android:id="@+id/editTextNumber"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:hint="@string/hint_enter_number"
+                android:inputType="number"
+                android:importantForAutofill="no"
+                android:layout_marginBottom="16dp"/>
 
-        <Button
-            android:id="@+id/buttonReadNfc"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:backgroundTint="@color/success_green"
-            android:textColor="@color/white"
-            android:text="Start Scanning"
-            android:layout_marginBottom="32dp"/>
+            <Button
+                android:id="@+id/buttonWriteNfc"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/button_write_nfc"
+                android:layout_marginBottom="8dp"/>
 
-        <Button
-            android:id="@+id/buttonCheckInNfc"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Check IN Card"
-            android:layout_marginBottom="8dp"/>
+            <Button
+                android:id="@+id/buttonReadNfc"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:backgroundTint="@color/success_green"
+                android:textColor="@color/white"
+                android:text="@string/button_start_scanning"
+                android:layout_marginBottom="32dp"/>
 
-        <Button
-            android:id="@+id/buttonCheckOutNfc"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Check OUT Card"
-            android:layout_marginBottom="32dp"/>
+            <Button
+                android:id="@+id/buttonCheckInNfc"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/button_check_in"
+                android:layout_marginBottom="8dp"/>
 
-        <Button
-            android:id="@+id/buttonClearScans"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Clear scans"
-            android:textColor="@color/white"
-            android:backgroundTint="@color/error_red"
-            android:layout_marginBottom="8dp"/>
+            <Button
+                android:id="@+id/buttonCheckOutNfc"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/button_check_out"
+                android:layout_marginBottom="32dp"/>
 
-        <Button
-            android:id="@+id/buttonResetGame"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Reset Game"
-            android:textColor="@color/white"
-            android:backgroundTint="@color/error_red"
-            android:layout_marginBottom="32dp"/>
+            <Button
+                android:id="@+id/buttonClearScans"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/button_clear_scans"
+                android:textColor="@color/white"
+                android:backgroundTint="@color/error_red"
+                android:layout_marginBottom="8dp"/>
 
-        <TextView
-            android:id="@+id/textViewStatus"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Status: Idle"
-            android:textSize="18sp"
-            android:gravity="center"
-            android:padding="8dp"/>
-    </LinearLayout>
+            <Button
+                android:id="@+id/buttonResetGame"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/button_reset_game"
+                android:textColor="@color/white"
+                android:backgroundTint="@color/error_red"
+                android:layout_marginBottom="32dp"/>
 
-    <!-- Scanning Animation (ProgressBar - will be hidden for the new animation) -->
-    <ProgressBar
-        android:id="@+id/progressBarScanning"
-        style="?android:attr/progressBarStyleLarge"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="center"
-        android:visibility="gone" />
+            <TextView
+                android:id="@+id/textViewStatus"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/status_idle"
+                android:textSize="18sp"
+                android:gravity="center"
+                android:padding="8dp"/>
 
-    <!-- New Scanning Bar -->
+            <Button
+                android:id="@+id/buttonSettings"
+                style="?android:attr/borderlessButtonStyle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/button_settings"
+                android:layout_marginTop="16dp"/>
+        </LinearLayout>
+    </ScrollView>
+
+    <!-- Scanning Bar -->
     <View
         android:id="@+id/scanningBar"
         android:layout_width="match_parent"
         android:layout_height="16dp"
         android:background="@color/error_red"
-        android:visibility="gone" /> <!-- Initially hidden -->
+        android:contentDescription="@string/cd_scanning_bar"
+        android:visibility="gone" />
 
     <!-- Success Number Display -->
     <TextView
@@ -120,6 +128,7 @@
         android:textStyle="bold"
         android:textColor="@android:color/white"
         android:fontFamily="@font/socafe"
-        android:visibility="gone" /> <!-- Initially hidden -->
+        android:importantForAccessibility="yes"
+        android:visibility="gone" />
 
 </FrameLayout>

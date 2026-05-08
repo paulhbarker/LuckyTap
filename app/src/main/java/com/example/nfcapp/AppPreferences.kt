@@ -1,14 +1,18 @@
-// file: app/src/main/java/com/example/nfcapp/AppPreferences.kt
 package com.example.nfcapp
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.util.Log
+import androidx.core.content.edit
 import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKeys
+import androidx.security.crypto.MasterKey
+import java.io.File
+import java.security.KeyStore
 
-class AppPreferences(context: Context) {
+class AppPreferences private constructor(context: Context) {
 
     companion object {
+        private const val TAG = "AppPreferences"
         private const val PREFS_NAME = "nfc_app_prefs"
         private const val SECURE_PREFS_NAME = "secure_nfc_app_prefs"
         private const val KEY_WIFI_SSID_OVERRIDE = "wifi_ssid_override"
@@ -16,48 +20,96 @@ class AppPreferences(context: Context) {
         private const val KEY_WS_IP_OVERRIDE = "ws_ip_override"
         private const val KEY_WS_PORT_OVERRIDE = "ws_port_override"
 
-        const val DEFAULT_WIFI_SSID = "REDACTED_SSID"
-        const val DEFAULT_WIFI_PASSWORD = "REDACTED_PASSWORD"
-        const val DEFAULT_WS_IP = "192.168.50.2" // Your existing default
-        const val DEFAULT_WS_PORT = "8080"       // Your existing default
+        val DEFAULT_WIFI_SSID: String get() = BuildConfig.DEFAULT_WIFI_SSID
+        val DEFAULT_WIFI_PASSWORD: String get() = BuildConfig.DEFAULT_WIFI_PASSWORD
+        val DEFAULT_WS_IP: String get() = BuildConfig.DEFAULT_WS_IP
+        val DEFAULT_WS_PORT: String get() = BuildConfig.DEFAULT_WS_PORT
+
+        @Volatile
+        private var INSTANCE: AppPreferences? = null
+
+        fun getInstance(context: Context): AppPreferences {
+            return INSTANCE ?: synchronized(this) {
+                INSTANCE ?: AppPreferences(context.applicationContext).also { INSTANCE = it }
+            }
+        }
     }
 
-    private val masterKeyAlias = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC)
+    private val sharedPreferences: SharedPreferences =
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
-    private val sharedPreferences: SharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-    private val encryptedSharedPreferences: SharedPreferences = EncryptedSharedPreferences.create(
-        SECURE_PREFS_NAME,
-        masterKeyAlias,
-        context,
-        EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-        EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-    )
+    private val encryptedSharedPreferences: SharedPreferences = createEncryptedPrefs(context)
+
+    private fun createEncryptedPrefs(context: Context): SharedPreferences {
+        return try {
+            buildEncryptedPrefs(context)
+        } catch (e: Exception) {
+            Log.e(TAG, "EncryptedSharedPreferences failed, resetting crypto state", e)
+            clearCorruptedCryptoState(context)
+            buildEncryptedPrefs(context) // retry with fresh keys
+        }
+    }
+
+    private fun buildEncryptedPrefs(context: Context): SharedPreferences {
+        val masterKey = MasterKey.Builder(context)
+            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+            .build()
+        return EncryptedSharedPreferences.create(
+            context,
+            SECURE_PREFS_NAME,
+            masterKey,
+            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
+        )
+    }
+
+    private fun clearCorruptedCryptoState(context: Context) {
+        // Delete the encrypted prefs file from disk
+        val prefsFile = File(context.filesDir.parent, "shared_prefs/$SECURE_PREFS_NAME.xml")
+        if (prefsFile.exists()) {
+            val deleted = prefsFile.delete()
+            Log.w(TAG, "Deleted corrupted prefs file: $deleted")
+        }
+
+        // Remove the Tink master keyset from normal SharedPreferences
+        context.getSharedPreferences(
+            "__androidx_security_crypto_encrypted_prefs__", Context.MODE_PRIVATE
+        ).edit { clear() }
+
+        // Remove the master key alias from Android Keystore
+        try {
+            val keyStore = KeyStore.getInstance("AndroidKeyStore")
+            keyStore.load(null)
+            val alias = "_androidx_security_master_key_"
+            if (keyStore.containsAlias(alias)) {
+                keyStore.deleteEntry(alias)
+                Log.w(TAG, "Deleted master key alias from Keystore")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to delete Keystore alias", e)
+        }
+    }
 
     // WiFi
     var wifiSsidOverride: String?
         get() = sharedPreferences.getString(KEY_WIFI_SSID_OVERRIDE, null)
-        set(value) = sharedPreferences.edit().putString(KEY_WIFI_SSID_OVERRIDE, value).apply()
+        set(value) = sharedPreferences.edit { putString(KEY_WIFI_SSID_OVERRIDE, value) }
 
-    var wifiPasswordOverride: String? // Stored encrypted
+    var wifiPasswordOverride: String?
         get() = encryptedSharedPreferences.getString(KEY_WIFI_PASSWORD_OVERRIDE, null)
-        set(value) = encryptedSharedPreferences.edit().putString(KEY_WIFI_PASSWORD_OVERRIDE, value).apply()
+        set(value) = encryptedSharedPreferences.edit { putString(KEY_WIFI_PASSWORD_OVERRIDE, value) }
 
     fun getEffectiveWifiSsid(): String = wifiSsidOverride ?: DEFAULT_WIFI_SSID
     fun getEffectiveWifiPassword(): String = wifiPasswordOverride ?: DEFAULT_WIFI_PASSWORD
 
-    fun clearWifiOverrides() {
-        sharedPreferences.edit().remove(KEY_WIFI_SSID_OVERRIDE).apply()
-        encryptedSharedPreferences.edit().remove(KEY_WIFI_PASSWORD_OVERRIDE).apply()
-    }
-
     // WebSocket
     var wsIpOverride: String?
         get() = sharedPreferences.getString(KEY_WS_IP_OVERRIDE, null)
-        set(value) = sharedPreferences.edit().putString(KEY_WS_IP_OVERRIDE, value).apply()
+        set(value) = sharedPreferences.edit { putString(KEY_WS_IP_OVERRIDE, value) }
 
     var wsPortOverride: String?
         get() = sharedPreferences.getString(KEY_WS_PORT_OVERRIDE, null)
-        set(value) = sharedPreferences.edit().putString(KEY_WS_PORT_OVERRIDE, value).apply()
+        set(value) = sharedPreferences.edit { putString(KEY_WS_PORT_OVERRIDE, value) }
 
     fun getEffectiveWsIp(): String = wsIpOverride ?: DEFAULT_WS_IP
     fun getEffectiveWsPort(): String = wsPortOverride ?: DEFAULT_WS_PORT
@@ -65,10 +117,6 @@ class AppPreferences(context: Context) {
     fun getEffectiveWebSocketUrl(): String {
         val ip = getEffectiveWsIp()
         val port = getEffectiveWsPort()
-        return "ws://$ip:$port/ws"
-    }
-
-    fun clearWebSocketOverrides() {
-        sharedPreferences.edit().remove(KEY_WS_IP_OVERRIDE).remove(KEY_WS_PORT_OVERRIDE).apply()
+        return "ws://$ip:$port/ws/lucky-draw"
     }
 }
