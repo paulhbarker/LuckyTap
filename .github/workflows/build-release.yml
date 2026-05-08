@@ -18,20 +18,20 @@ jobs:
     steps:
       # ── Checkout ────────────────────────────────────────────────────────────
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       # ── Java ────────────────────────────────────────────────────────────────
       # AGP 9.x requires JDK 17+.  The Kotlin jvmToolchain(11) target is for
       # *source* compilation and is unaffected by the host JDK version.
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           java-version: '17'
           distribution: 'temurin'
 
       # ── Gradle ──────────────────────────────────────────────────────────────
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v6
 
       # ── Version ─────────────────────────────────────────────────────────────
       # Derive versionName / versionCode from the release tag (e.g. "v1.2.3").
@@ -71,13 +71,13 @@ jobs:
 
       # ── Upload artifacts to the GitHub release ───────────────────────────────
       - name: Upload APK to release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           files: app/build/outputs/apk/release/*.apk
 
       - name: Upload AAB to release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           files: app/build/outputs/bundle/release/*.aab
