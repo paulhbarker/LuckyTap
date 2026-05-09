@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.0](https://github.com/paulhbarker/LuckyTap/compare/v1.0.2...v1.1.0) (2026-05-09)
+
+
+### Features
+
+* square icon with rounded corners, red download button from icon palette ([7625412](https://github.com/paulhbarker/LuckyTap/commit/7625412ad1be8f861b37f95d5461406e5db7c501))
+* use real app icon on install landing page ([94eba6e](https://github.com/paulhbarker/LuckyTap/commit/94eba6e30d4f4039925938b32f795824272b8be1))
+
 ## [1.0.2](https://github.com/paulhbarker/LuckyTap/compare/v1.0.1...v1.0.2) (2026-05-08)
 
 
